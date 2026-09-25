@@ -332,6 +332,64 @@ In a quiet moment Bybit showed 95 ms. Under activity, which is exactly when the 
   - No price/time cell is significant after costs.
 - The 5m book is calibrated for a slow taker.
 
+## 4g. A slow edge: weekly "Will Bitcoin reach / dip to $X" markets (`r40`, `r41`)
+
+**Market.**
+- Series `bitcoin-hit-price-weekly` (Polymarket series 10151), about 15 strikes per week.
+- YES if any Binance BTCUSDT 1-minute candle from market creation to Sunday 11:59 PM ET has High ≥ X (reach) or Low ≤ X (dip).
+- About $200k traded per day. Taker fee 0.07·p(1−p).
+
+**Model.**
+- P(touch before the end) = min(1, 2·P(T₄ > b/(σ√τ))), where:
+  - b = |ln(X/S)|;
+  - T₄ is Student-t(4) scaled to unit variance;
+  - σ = EWMA (1-day half-life) of Binance 1-minute return variance.
+- It uses only candles closed before the decision.
+- Tails and half-life were chosen on the first half of weeks (log-loss); the second half is out-of-sample.
+
+**Rule.**
+- Every 6 h, for each strike not yet hit: buy the side whose model value exceeds its cost by > 10¢. Cost = mid + half spread + slippage + taker fee.
+- 85% of the dollars go to NO: the market **overprices touch probability**, most of all for strikes near 50¢ early in the week.
+- Positions are held to resolution.
+
+**Data.**
+- 902 markets, 63 weeks (Jul 2025 – Sep 2026).
+- CLOB midpoint history. The live check confirms it is the book midpoint.
+- Outcomes rebuilt from Binance 1-minute candles; 99% match the market's own resolutions.
+
+**Out-of-sample results** (second half: 31 weeks, per share, costs included):
+
+| entry delay after signal | ¢/share | week-clustered t |
+|---|---|---|
+| 5 min | +18.4 | 5.0 |
+| 30 min | +16.5 | 4.4 |
+| 60 min | +12.5 | 3.5 |
+
+**Robustness.**
+- Positive in every quarter: 2025Q3 +16.1, Q4 +18.6, 2026Q1 +17.8, Q2 +20.9, Q3 +15.0¢/share.
+- Positive in falling, flat and rising weeks. Strongly rising weeks (> +5%) are about flat.
+- Dose-response: model edge 10–15¢ → +5.9¢ realised; 15–20¢ → +11.7¢; 20–30¢ → +25.6¢; > 30¢ → +35.6¢.
+- The naive "always buy NO at mid-range" rule does **not** work; the model is needed.
+
+**Executability.** Real NO buys in these markets (27 sampled markets, 2,256 trades, mid-range periods) paid:
+- a median of +1.0¢ above (1 − mid);
+- +2.0¢ at the 75th percentile;
+- +3.6¢ at the 90th percentile.
+
+The simulation charges 2.0¢ (and 3.5¢ in the harsh run). NO-buy volume in those periods was about $15k per market.
+
+**Portfolio simulation** (`r41`: $250 clips every 6 h, max $1,000 per strike):
+- **Out-of-sample:** +$1,157 per week (t 4.1), 9 losing weeks of 30, worst week −$1,957.
+- **Capital in use:** $2.6k on average, $5.5k at the 95th percentile, $8k peak.
+- **With 3.5¢ total costs:** +$1,105 per week.
+- **With $500 clips / $3,000 per strike:** +$2,399 per week, $5.7k average capital, $22k peak.
+
+**Caveats.**
+- This is a behavioural mispricing in a retail market. It can shrink if others trade it.
+- One bad week can cost about one to two good weeks.
+- It needs real capital: about $5–8k to run the $250/$1,000 sizing.
+- The monthly series (14 months) is not reliable and is not used.
+
 ## 5. Deliverable: `bot/`
 
 - It uses exactly the backtested quoting logic and the same queue-aware fill model (paper mode).
