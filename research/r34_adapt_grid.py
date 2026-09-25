@@ -42,11 +42,11 @@ CFGSETS={
  },
  'lsrc':{
   'bn_ld0':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':0},
-  'bn_ld130':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':130},
+  'bn_ld230':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':230},
   'cb_ld0':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'cb','cld':0},
-  'cb_ld40':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'cb','cld':40},
-  'both_130_40':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'both','ld':130,'cld':40},
-  'both_130_40_t02':{'back':3,'W':300,'thr':0.2,'cool':1500,'src':'both','ld':130,'cld':40},
+  'cb_ld50':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'cb','cld':50},
+  'both_200_50':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'both','ld':200,'cld':50},
+  'cb_ld50_t02':{'back':3,'W':300,'thr':0.2,'cool':1500,'src':'cb','cld':50},
  },
  'test':{
   'b3_g300':{'back':3,'W':300,'thr':0.3,'cool':1500},
