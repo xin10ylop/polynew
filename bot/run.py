@@ -148,7 +148,8 @@ class Bot:
             return ex.working(m.cid, side_up, now_ms)
 
         def open_size(side_up):
-            return sum((o["size"] if isinstance(o, dict) else o.size - o.filled) for o in working(side_up))
+            return sum(((o["size"] - o.get("filled", 0.0)) if isinstance(o, dict) else o.size - o.filled)
+                       for o in working(side_up))
 
         over_cap = (acct.cost[True] + acct.cost[False]) >= self.cfg.max_usd_per_market
         want = {} if (not allowed or over_cap) else desired_quotes(
@@ -295,10 +296,10 @@ class Bot:
                             if it.get("event_type") != "trade":
                                 continue
                             for mo in it.get("maker_orders", []):
-                                for (cid, side_up), o in list(self.live.open.items()):
-                                    if o["order_id"] == mo.get("order_id"):
-                                        self.on_fill("live", cid, side_up, float(mo["price"]),
-                                                     float(mo["matched_amount"]), int(time.time() * 1000))
+                                sz = float(mo.get("matched_amount") or 0)
+                                key = self.live.on_fill(mo.get("order_id"), sz)
+                                if key is not None:
+                                    self.on_fill("live", key[0], key[1], float(mo["price"]), sz, int(time.time() * 1000))
             except Exception as ex:  # noqa: BLE001
                 print("user ws error", repr(ex)[:120], flush=True)
                 await asyncio.sleep(1)
