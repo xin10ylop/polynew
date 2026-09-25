@@ -190,6 +190,11 @@ Everything @50 ms was ≈ 0.
 
 These are the defaults now in `bot/config.py` (`BOT_BACK_TICKS=3`, guard 300 ms / 0.3 bp, size 10).
 
+**BTC 15m check.** The same frozen variants were run on 220 recent 15m windows (Sep 10–23).
+- 3 behind + guard: +1.4¢/share but only **+$0.08 per window** (t 0.3, ~6 shares filled per window). The sign flips from day to day.
+- Best variant, 3 behind + guard + fair cap @50 ms: +$0.23 per window (t 0.95).
+- **No usable edge on 15m.** 15m takers are better informed (see §3.5), so 5m is the only venue with a maker edge.
+
 ## 5. Deliverable: `bot/`
 
 - It uses exactly the backtested quoting logic and the same queue-aware fill model (paper mode).
