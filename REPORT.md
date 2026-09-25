@@ -18,16 +18,13 @@ No real money was traded. That is the final step, and it needs the right host (s
 2. **Jev (TypeSafe System One) adds no edge here** in any of the three roles tested: direct forecaster, the video bots' designs, and regime gate.
    - It is fast (≈230 ms p50 via OpenRouter) and cheap.
    - But this is a numeric microstructure problem, and TypeSafe itself says Jev is weak at numbers. Its probabilities were badly overconfident.
-3. **The edge that does exist is being a *fast* maker: "deep liquidity" quoting.**
-   - Rest bids 2 ticks behind the best bid on *both* Up and Down.
-   - Re-price within ~20–50 ms of every book change.
-   - Get filled mainly by large market orders that sweep the book and then revert, and lock Up+Down pairs below $1.
-   - On real archived order books this earned **+1.4 to +2.8¢ per share filled** at 20 ms, on most dates.
-   - It is **sharply latency-dependent** (≈0 at 50–100 ms without the BTC guard; negative at 100 ms+).
-   - It is **regime-dependent**: Sep 25 lost money even at 20 ms.
-4. **A causal regime gate** fixes most of the bad-regime damage.
-   - Rule: trade a window only if a shadow simulation of the strategy made money over the previous hour.
-   - Result: the Sep 25 loss dropped from −$402 to −$43, and average profit per traded window rose from $3.3 to $5.1 (2 behind @20 ms).
+3. **The edge that did exist: a *fast* "deep liquidity" maker.**
+   - Rest bids 2 ticks behind the best bid on *both* Up and Down, re-price within ~20 ms, get filled by sweeping market orders that revert, and lock Up+Down pairs below $1.
+   - On real archived order books, Aug 19 – Sep 6 (639 windows), this earned **+2.2¢/share (t 9.5) at 20 ms**.
+   - **It has decayed:** Sep 10 – 21 (423 windows) came in at **−1.9¢/share (t −4.8)**, and Sep 25 at −2.4¢.
+   - A BTC-move-guarded variant is still slightly positive recently (+1.7¢/share, t 1.5), which is **not significant** and is tiny in dollars.
+   - The regime gate does not rescue the recent period.
+4. **Current status: no strategy is proven profitable *today*.** The bot and the tests are built so that a fast host can re-verify quickly. See §4c for the regime-adaptation work.
 5. **Deliverable:** `bot/` is a paper/live implementation of exactly the backtested logic, with the gate, BTC lead guard, feed-lag and stale-feed guards, and inventory, dollar and daily-loss caps.
    - It must run in or next to **AWS eu-west-2 (London)**.
    - From this cloud container the feed arrived 0.3–10 s late, which is exactly the failure mode that kills makers.
@@ -138,9 +135,32 @@ The archive was validated against the official trade tape: 95–96% of trades ar
 | 2 behind @20 ms | +3.32 | **+5.07** | −1.88 | −$402 → **−$43** |
 | 2 behind @50 ms | +0.45 | **+2.49** | −2.37 | −$892 → **$0** |
 
-### 4b. Final all-blocks grid
+### 4b. Final all-blocks grid (921 + 141 windows, 11 date blocks)
 
-(filled in below when the run completes)
+PnL per share filled, including the maker rebate:
+
+| strategy | latency | Aug 19 – Sep 6 | Sep 10 – Sep 21 | Sep 25 |
+|---|---|---|---|---|
+| 2 behind | 20 ms | **+2.22¢ (t 9.5)** | **−1.88¢ (t −4.8)** | −2.4¢ |
+| 2 behind + BTC guard (300 ms / 0.3 bp) | 20 ms | +2.47¢ (t 6.9) | +1.73¢ (t 1.5) | n/a (no ms BTC data yet) |
+| 1 behind + BTC guard (500 ms / 0.5 bp) | 20 ms | +1.57¢ (t 8.0) | −0.09¢ | — |
+| 2 behind | 50 ms | +0.73¢ (t 3.5) | −2.42¢ (t −10.5) | −2.9¢ |
+| 2 behind + BTC guard | 50 ms | +1.75¢ (t 4.6) | +0.02¢ | — |
+| any variant | 100 ms | ≤ 0 | < 0 | < 0 |
+
+Per-date, 2 behind @20 ms:
+
+| Aug 19 | Aug 23 | Aug 24 | Aug 28 | Sep 2 | Sep 6 | Sep 10 | Sep 11 | Sep 15 | Sep 16 | Sep 21 | Sep 25 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| +2.6¢ | +2.4¢ | +2.2¢ | +0.7¢ | +1.9¢ | +2.8¢ | −0.5¢ | −4.6¢ | −2.6¢ | −1.7¢ | −2.4¢ | −2.4¢ |
+
+- Adding a regime gate (lag 2, K 12) on Sep 10+ gives 2 behind @20 ms −0.57¢/share, and the guarded variant +0.98¢ (t 0.6). Not enough.
+- **Interpretation.** The deep fills are now adversely selected, while the BTC guard still protects. So sweeps became *informed* after the taker delay rose to 150 ms (Sep 4). Plausibly, fast takers now sweep deeper to guarantee fills after the delay, and more fast makers compete for the reverting flow.
+
+### 4c. Regime adaptation (in progress)
+
+- **Train on Sep 10–16:** pull-both guards, tighter guards, deeper quotes, fair-value cap, calm-only, time-in-window.
+- **Test on unseen Sep 18, 21 and 23.** Results are appended when complete.
 
 ## 5. Deliverable: `bot/`
 
