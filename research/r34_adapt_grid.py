@@ -1,6 +1,6 @@
 """Regime-adaptation maker grid (recent regime). Extends r30 with: pull-both guard, fair-value cap (TWAP model),
 calm-only quoting (BTC futures move over last 60s), time-in-window limits. Args: dur lats workers ; env START_MIN/START_MAX/TAG/CFGSET"""
-import sys, glob, json, os; sys.path.insert(0,'.')
+import sys, glob, json, os, collections; sys.path.insert(0,'.')
 import numpy as np, pandas as pd
 from multiprocessing import Pool
 dur_f=sys.argv[1]; LATS=[int(x) for x in sys.argv[2].split(',')]; NW=int(sys.argv[3]) if len(sys.argv)>3 else 3
@@ -48,6 +48,14 @@ CFGSETS={
   'both_200_50':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'both','ld':200,'cld':50},
   'cb_ld50_t02':{'back':3,'W':300,'thr':0.2,'cool':1500,'src':'cb','cld':50},
  },
+ 'bookg':{
+  'b3_bn230':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':230},
+  'b3_book1':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'none','bm':1,'bW':300,'bcool':1500},
+  'b3_book2':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'none','bm':2,'bW':300,'bcool':1500},
+  'b3_book1_w1s':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'none','bm':1,'bW':1000,'bcool':2000},
+  'b3_book1_cb50':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'cb','cld':50,'bm':1,'bW':300,'bcool':1500},
+  'b4_book1':{'back':4,'W':300,'thr':0.3,'cool':1500,'src':'none','bm':1,'bW':300,'bcool':1500},
+ },
  'test':{
   'b3_g300':{'back':3,'W':300,'thr':0.3,'cool':1500},
   'b2_g300_fair1':{'back':2,'W':300,'thr':0.3,'cool':1500,'fair':0.01},
@@ -76,7 +84,7 @@ def work(cid):
     fu=pd.read_parquet(p); fu=fu[(fu.ms>=(st-90)*1000)&(fu.ms<=(en+5)*1000)]
     lms,lpx=fu.ms.values,fu.px.values
     pc=f'data/cb_ms/{pd.Timestamp(st,unit="s"):%Y-%m-%d}.parquet'
-    if any(c.get('src','bn')!='bn' for c in CFG.values()):
+    if any(c.get('src','bn') in ('cb','both') for c in CFG.values()):
         if not os.path.exists(pc): return []
         cb=pd.read_parquet(pc); cb=cb[(cb.ms>=(st-90)*1000)&(cb.ms<=(en+5)*1000)]
         cms,cpx=cb.ms.values,cb.px.values
@@ -121,7 +129,7 @@ def work(cid):
     for lat in LATS:
         for name,cfg in CFG.items():
             if cfg.get('fair') is not None and not fair_ok: continue
-            state={'pu':0,'pd':0}
+            state={'pu':0,'pd':0,'mh':collections.deque()}
             def pol(tt,book,pos,cfg=cfg,state=state):
                 el=tt/1000-st
                 if tt/1000>en-5 or el<0: return {}
@@ -131,7 +139,14 @@ def work(cid):
                 if bb is None or ba is None: return {}
                 back=cfg['back']*TICK; pu=round(bb-back,2); pdn=round(1-ba-back,2)
                 if cfg.get('calm') is not None and abs(lead_mv(tt,60000))>cfg['calm']: return {}
-                mv=guard_mv(tt,cfg)  # ld/cld: Binance/Coinbase feed transport delay (ms)
+                if cfg.get('bm') is not None:
+                    # book guard: Polymarket mid moved >= bm ticks within bW ms (seen with feed+order latency via lat)
+                    mh=state['mh']; mid=(bb+ba)/2; mh.append((tt,mid))
+                    while mh and mh[0][0]<tt-cfg['bW']: mh.popleft()
+                    dm=(mid-min(m for _,m in mh))/TICK, (max(m for _,m in mh)-mid)/TICK
+                    if dm[0]>=cfg['bm']: state['pd']=max(state['pd'],tt+cfg['bcool'])
+                    if dm[1]>=cfg['bm']: state['pu']=max(state['pu'],tt+cfg['bcool'])
+                mv=guard_mv(tt,cfg) if cfg.get('src')!='none' else 0.0  # ld/cld: Binance/Coinbase feed delay (ms)
                 if abs(mv)>=cfg['thr']:
                     if cfg.get('both'):
                         state['pu']=state['pd']=tt+cfg['cool']

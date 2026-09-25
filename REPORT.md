@@ -29,6 +29,7 @@ No real money was traded. That is the final step, and it needs the right host (s
    - Out-of-sample over Sep 18, 21 and 23 it made **+3.0¢/share at 20 ms** (t 1.7, bootstrap P(≤0) = 5%) and +1.6¢ at 50 ms. It was positive on all three days.
    - It is only about **$0.45 per window at 10-share clips (~$130/day)**. It is real but modest, and fragile to latency and regime (§4c).
    - Over a month (§4d), with all losing windows and days included, that is about **+$2.6k (50 ms) to +$3.9k (20 ms) at 10-share clips**, *if the Sep 10–23 regime persists*. The regime gate hurts this variant, so it is now off by default.
+   - **Withdrawn (§4e):** those figures assumed the bot sees Binance BTC trades with 0 ms delay. Measured from Dublin, the delay is ~200 ms under load, and at that delay the strategy loses money.
 5. **Deliverable:** `bot/` is a paper/live implementation of exactly the backtested logic, with the gate, BTC lead guard, feed-lag and stale-feed guards, and inventory, dollar and daily-loss caps.
    - It must run in **AWS eu-west-1 (Dublin)**, next to the London engine. UK IPs are close-only on Polymarket's API, so London itself can't place orders.
    - From this cloud container the feed arrived 0.3–10 s late, which is exactly the failure mode that kills makers.
@@ -269,6 +270,43 @@ These are the defaults now in `bot/config.py` (`BOT_BACK_TICKS=3`, guard 300 ms 
   - ~$2.5–3k at 50;
   - ~$5–6k at 100. Raise `BOT_MAX_USD` and `BOT_DAILY_LOSS` in proportion.
 - Real capacity depends on how many sweeps reach 3 ticks deep and on how other bots react to larger resting orders. Neither is in the data, so size up only in steps validated live.
+
+### 4e. Reality check: BTC feed delay from Dublin (Sep 25, after the paper test)
+
+**Paper test.**
+- The Dublin paper bot lost $39 over its first 39 windows (−$1.01 per window, 13.8 shares per window, Up+Down pair cost $1.22).
+- That prompted a check of an assumption in §4c/§4d: the backtest's BTC guard read Binance trades at their *exchange* timestamp, i.e. with **0 ms** delay.
+
+**Measured on the Dublin server** (`bot/lead_probe.py`, receive time minus trade time, 30 s while BTC was active):
+
+| venue | p50 | p90 |
+|---|---|---|
+| Bybit perp (the bot's feed) | 234 ms | 400 ms |
+| Binance perp / spot | 204 / 177 ms | 337 / 301 ms |
+| OKX perp | 126 ms | 342 ms |
+| Coinbase spot | 48 ms | 52 ms |
+| Bitstamp / Kraken spot (thin) | 26 / 13 ms | 37 / 18 ms |
+
+In a quiet moment Bybit showed 95 ms. Under activity, which is exactly when the guard matters, it is 230–400 ms.
+
+**Backtest with realistic guard delays** (678 windows Sep 10–23, 3 behind, 10-share clips, $ per window incl. rebate; `ld` = Binance delay, `cld` = Coinbase delay, lat = order/cancel latency):
+
+| guard | lat 20 | lat 30 | lat 50 |
+|---|---|---|---|
+| Binance 0 ms (original assumption) | +0.46 | +0.46 | +0.24 |
+| Binance 100 ms | +0.37 | | +0.12 |
+| Binance 150 ms | +0.38 | | −0.02 |
+| **Binance 230 ms (≈ what the bot really has)** | | **−0.09** | **−0.73** |
+| Coinbase 0 ms | | +0.07 | −0.44 |
+| Coinbase 50 ms | | −0.02 | −0.47 |
+| Binance 200 + Coinbase 50 | | +0.11 | −0.09 |
+| no guard | −1.77 | | −3.92 |
+
+**Conclusion.**
+- The toxic sweeps are predicted by **Binance** moves specifically: Coinbase, even at zero delay, does not protect.
+- From Dublin, Binance data arrives ~200 ms late under load. At that delay the deep maker **loses** (−$0.09 to −$0.73 per window). The §4c/§4d profit estimates assumed an impossible guard latency and are withdrawn.
+- The paper loss is consistent with this.
+- The BTC 5m/15m markets also carry **no liquidity-rewards pool** (CLOB `/rewards/markets/<cid>` is empty), so there is no quoting subsidy to lean on.
 
 ## 5. Deliverable: `bot/`
 
