@@ -70,6 +70,8 @@ class MakerSim:
     where price is the price WE pay for that side (Down price M -> Up-ask level 1-M)."""
 
     def __init__(self, place_lat=150, cancel_lat=150, decide_every=200):
+        self.n_place = 0
+        self.n_cancel = 0
         self.place_lat = place_lat
         self.cancel_lat = cancel_lat
         self.decide_every = decide_every
@@ -141,6 +143,8 @@ class MakerSim:
             cur = [o for o in orders if o.side_up == side_up and o.cancel_at > t]
             if w is None or pos[side_up] >= max_pos:
                 for o in cur:
+                    if o.cancel_at > t + self.cancel_lat:
+                        self.n_cancel += 1
                     o.cancel_at = min(o.cancel_at, t + self.cancel_lat)
                 continue
             price, size = w
@@ -153,6 +157,9 @@ class MakerSim:
             keep = [o for o in cur if abs(o.level - level) < 1e-9]
             for o in cur:
                 if o not in keep:
+                    if o.cancel_at > t + self.cancel_lat:
+                        self.n_cancel += 1
                     o.cancel_at = min(o.cancel_at, t + self.cancel_lat)
             if not keep and 0.0 < level < 1.0:
+                self.n_place += 1
                 orders.append(Order(side_up, level, size, live_at=t + self.place_lat))
