@@ -308,6 +308,30 @@ In a quiet moment Bybit showed 95 ms. Under activity, which is exactly when the 
 - The paper loss is consistent with this.
 - The BTC 5m/15m markets also carry **no liquidity-rewards pool** (CLOB `/rewards/markets/<cid>` is empty), so there is no quoting subsidy to lean on.
 
+### 4f. Last rescue attempts for the fast maker, and a slow calibration scan (Sep 25)
+
+**Polymarket book-momentum guard** (pull the side a ≥1–2 tick mid move makes stale; sees fast makers' repricing with ~10 ms feed delay). 678 windows Sep 10–23, $ per window:
+
+| guard | lat 30 | lat 60 |
+|---|---|---|
+| Binance 230 ms (what the bot has) | −0.09 | −1.46 |
+| book 1 tick / 300 ms | −0.50 | −0.74 |
+| book 2 ticks / 300 ms | −0.71 | −1.43 |
+| book 1 tick / 1 s | −0.41 | −0.64 |
+| book 1 tick + Coinbase 50 ms | +0.15 (t 1.0) | +0.19 (t 0.9) |
+| 4 behind + book 1 tick | −0.21 | −0.77 |
+
+- No variant is significantly profitable at a latency this setup can reach.
+- **The fast deep-maker is closed.**
+
+**Slow calibration scan** (`r36`, `r37`): is the price at a fixed time before expiry calibrated against the outcome?
+- **On trade prices** (11,763 windows):
+  - 5m favorites at 80–93¢ with 20–60 s left seem to win 2–5¢ more often than priced.
+- **On executable L2 asks** (1,372 archived windows, buying the favorite at its best ask, fee included):
+  - The same cells give **+0.5¢, t 0.4**. The apparent edge was trade prices lagging the book during moves.
+  - No price/time cell is significant after costs.
+- The 5m book is calibrated for a slow taker.
+
 ## 5. Deliverable: `bot/`
 
 - It uses exactly the backtested quoting logic and the same queue-aware fill model (paper mode).
