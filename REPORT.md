@@ -24,7 +24,10 @@ No real money was traded. That is the final step, and it needs the right host (s
    - **It has decayed:** Sep 10 – 21 (423 windows) came in at **−1.9¢/share (t −4.8)**, and Sep 25 at −2.4¢.
    - A BTC-move-guarded variant is still slightly positive recently (+1.7¢/share, t 1.5), which is **not significant** and is tiny in dollars.
    - The regime gate does not rescue the recent period.
-4. **Current status: no strategy is proven profitable *today*.** The bot and the tests are built so that a fast host can re-verify quickly. See §4c for the regime-adaptation work.
+4. **After adapting to the new regime, a small edge survives on unseen data.**
+   - Quote **3 ticks** behind on both sides, with a BTC guard that pulls quotes on ≥0.3 bp moves within 300 ms.
+   - Out-of-sample over Sep 18, 21 and 23 it made **+3.0¢/share at 20 ms** (t 1.7, bootstrap P(≤0) = 5%) and +1.6¢ at 50 ms. It was positive on all three days.
+   - It is only about **$0.45 per window at 10-share clips (~$130/day)** and does not scale linearly. It is real but modest, and fragile to latency and regime (§4c).
 5. **Deliverable:** `bot/` is a paper/live implementation of exactly the backtested logic, with the gate, BTC lead guard, feed-lag and stale-feed guards, and inventory, dollar and daily-loss caps.
    - It must run in or next to **AWS eu-west-2 (London)**.
    - From this cloud container the feed arrived 0.3–10 s late, which is exactly the failure mode that kills makers.
@@ -157,10 +160,35 @@ Per-date, 2 behind @20 ms:
 - Adding a regime gate (lag 2, K 12) on Sep 10+ gives 2 behind @20 ms −0.57¢/share, and the guarded variant +0.98¢ (t 0.6). Not enough.
 - **Interpretation.** The deep fills are now adversely selected, while the BTC guard still protects. So sweeps became *informed* after the taker delay rose to 150 ms (Sep 4). Plausibly, fast takers now sweep deeper to guarantee fills after the delay, and more fast makers compete for the reverting flow.
 
-### 4c. Regime adaptation (in progress)
+### 4c. Regime adaptation: train on Sep 10–16, test on unseen Sep 18 / 21 / 23
 
-- **Train on Sep 10–16:** pull-both guards, tighter guards, deeper quotes, fair-value cap, calm-only, time-in-window.
-- **Test on unseen Sep 18, 21 and 23.** Results are appended when complete.
+**Training.** 9 variants were tried on Sep 10–16 (282 windows). The deep fills that decayed can be protected in two ways: quote **deeper** (3 ticks behind), or cap bids at the TWAP fair value. Both need the BTC guard (300 ms / 0.3 bp). The best training results @20 ms:
+
+| variant | ¢/share | $/window | t |
+|---|---|---|---|
+| 3 behind + guard | +4.4 | +0.47 | 1.9 |
+| 2 behind + guard + fair cap | +4.1 | +0.56 | 1.7 |
+
+Everything @50 ms was ≈ 0.
+
+**Out-of-sample.** Three candidates were frozen before looking at the test days. Results on unseen Sep 18, 21 and 23 (396 windows):
+
+| variant | latency | ¢/share | $/window (10-share clips) | t | P(mean ≤ 0), bootstrap | per day (18 / 21 / 23) |
+|---|---|---|---|---|---|---|
+| **3 behind + guard** | **20 ms** | **+3.0** | **+0.45** | 1.7 | **4.9%** | +0.2 / +8.6 / +1.3 ¢ |
+| 3 behind + guard | 50 ms | +1.6 | +0.40 | 1.3 | 9.6% | 0.0 / +4.3 / +1.1 ¢ |
+| 3 behind + guard + fair cap | 20 ms | +3.3 | +0.25 | 1.0 | — | +4.0 / +4.8 / +1.9 ¢ |
+| 2 behind + guard + fair cap | 20 ms | +0.1 | +0.02 | 0.1 | — | — |
+| 3 behind + guard, 100-share clips | 20 ms | +1.6 | +2.21 | 0.7 | — | — |
+
+**Conclusion.**
+- A small, **marginally significant** maker edge survives on recent unseen data. It is positive on every unseen day at both 20 and 50 ms.
+- In dollars it is modest: about **$0.45 per 5-minute window at 10-share clips**, or roughly $130/day across all 288 windows.
+- It **does not scale linearly**: per-share edge halves at 100-share clips out-of-sample.
+- It is latency-bound (≤50 ms), and the market has already changed regime once in September.
+- Sep 25 could not be tested: Binance ms BTC data is published the next day.
+
+These are the defaults now in `bot/config.py` (`BOT_BACK_TICKS=3`, guard 300 ms / 0.3 bp, size 10).
 
 ## 5. Deliverable: `bot/`
 
