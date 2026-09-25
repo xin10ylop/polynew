@@ -16,6 +16,17 @@ CFGSETS={
   'b2_g300_calm3':dict(G3,calm=3.0),
   'b2_g300_t180':dict(G3,tmax=180),
   'b2_g300_skip60':dict(G3,tmin=60),
+ },
+ 'size':{
+  'b3_g300':{'back':3,'W':300,'thr':0.3,'cool':1500},
+  'b3_g300_sz50':{'back':3,'W':300,'thr':0.3,'cool':1500,'sz':50.0},
+  'b3_g300_sz100':{'back':3,'W':300,'thr':0.3,'cool':1500,'sz':100.0},
+  'b4_g300':{'back':4,'W':300,'thr':0.3,'cool':1500},
+ },
+ 'test':{
+  'b3_g300':{'back':3,'W':300,'thr':0.3,'cool':1500},
+  'b2_g300_fair1':{'back':2,'W':300,'thr':0.3,'cool':1500,'fair':0.01},
+  'b3_g300_fair1':{'back':3,'W':300,'thr':0.3,'cool':1500,'fair':0.01},
  }}
 CFG=CFGSETS[os.environ.get('CFGSET','adapt')]
 def setup():
@@ -91,9 +102,9 @@ def work(cid):
                 if cfg.get('fair') is not None:
                     q=fair(tt); m=cfg['fair']
                     pu=min(pu,np.floor((q-m)/TICK+1e-9)*TICK); pdn=min(pdn,np.floor(((1-q)-m)/TICK+1e-9)*TICK)
-                imb=pos[True]-pos[False]; o={}
-                if tt>=state['pu'] and pu>=0.03 and imb<30: o['up']=(round(pu,2),10.0)
-                if tt>=state['pd'] and pdn>=0.03 and -imb<30: o['dn']=(round(pdn,2),10.0)
+                imb=pos[True]-pos[False]; o={}; sz=cfg.get('sz',10.0); mi=cfg.get('maxi',3*sz)
+                if tt>=state['pu'] and pu>=0.03 and imb<mi: o['up']=(round(pu,2),sz)
+                if tt>=state['pd'] and pdn>=0.03 and -imb<mi: o['dn']=(round(pdn,2),sz)
                 return o
             sim=MakerSim(place_lat=lat,cancel_lat=lat,decide_every=50)
             f=sim.run(ev,pol,st*1000,en*1000,max_pos=10**9)
