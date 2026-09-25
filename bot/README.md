@@ -32,7 +32,7 @@ For the current and next 5-minute BTC window:
 
 ## Hosting (matters more than anything else)
 
-- Polymarket's CLOB runs in **AWS eu-west-2 (London)**. Run the bot on an EC2 instance in eu-west-2, or at worst eu-west-1 (Dublin).
+- Polymarket's CLOB runs in AWS eu-west-2 (London), but **UK IP addresses are close-only on the Polymarket API** (no new orders). Run the bot in **eu-west-1 (Dublin)**, which is ~1–2 ms away and API-allowed. Step-by-step: `DEPLOY_AWS.md`.
 - Measured elsewhere: ~13–15 ms feed and ~21–23 ms order round trip from Dublin.
 - From a generic cloud box, this project measured 300–480 ms and multi-second feed lags. At those latencies the strategy **loses** (−2¢/share at 100 ms).
 - Confirm your jurisdiction is allowed to trade on Polymarket.

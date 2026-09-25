@@ -1,6 +1,6 @@
 """Live executor via the official py-clob-client (post-only GTC limit BUY orders).
 
-Requires env: POLY_PRIVATE_KEY, POLY_FUNDER (proxy wallet), POLY_SIG_TYPE. Run close to AWS eu-west-2 (London).
+Requires env: POLY_PRIVATE_KEY, POLY_FUNDER (proxy wallet), POLY_SIG_TYPE. Run in AWS eu-west-1 (Dublin): the engine is in London, but UK IPs are close-only on the API.
 Blocking HTTP calls run in a thread pool so the event loop keeps processing market data.
 
 Correctness details handled here:

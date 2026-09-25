@@ -29,7 +29,7 @@ No real money was traded. That is the final step, and it needs the right host (s
    - Out-of-sample over Sep 18, 21 and 23 it made **+3.0¢/share at 20 ms** (t 1.7, bootstrap P(≤0) = 5%) and +1.6¢ at 50 ms. It was positive on all three days.
    - It is only about **$0.45 per window at 10-share clips (~$130/day)** and does not scale linearly. It is real but modest, and fragile to latency and regime (§4c).
 5. **Deliverable:** `bot/` is a paper/live implementation of exactly the backtested logic, with the gate, BTC lead guard, feed-lag and stale-feed guards, and inventory, dollar and daily-loss caps.
-   - It must run in or next to **AWS eu-west-2 (London)**.
+   - It must run in **AWS eu-west-1 (Dublin)**, next to the London engine. UK IPs are close-only on Polymarket's API, so London itself can't place orders.
    - From this cloud container the feed arrived 0.3–10 s late, which is exactly the failure mode that kills makers.
 
 ## 1. Market mechanics (as of Sept 2026)
@@ -190,6 +190,39 @@ Everything @50 ms was ≈ 0.
 
 These are the defaults now in `bot/config.py` (`BOT_BACK_TICKS=3`, guard 300 ms / 0.3 bp, size 10).
 
+**The final variant across every tested day** (3 behind + BTC guard, 10-share clips; per window = per 5-minute market):
+
+| day | 20 ms ¢/share | 20 ms $/window | shares filled/window | 50 ms ¢/share | 50 ms $/window |
+|---|---|---|---|---|---|
+| Aug 19 | +2.1 | +1.71 | 81 | +2.2 | +1.54 |
+| Aug 23 | +4.7 | +2.71 | 58 | +1.0 | +0.55 |
+| Aug 24 | +7.4 | +2.84 | 38 | +6.5 | +2.02 |
+| Aug 28 | +4.6 | +1.35 | 29 | +4.5 | +1.06 |
+| Sep 02 | +4.1 | +2.46 | 60 | +3.6 | +1.98 |
+| Sep 06 | +3.7 | +2.91 | 80 | +3.1 | +2.15 |
+| Sep 10 | +4.8 | +0.62 | 13 | +1.5 | +0.42 |
+| Sep 11 | +13.6 | +0.67 | 5 | +3.7 | +0.53 |
+| Sep 15 | +8.9 | +0.54 | 6 | +4.8 | +0.46 |
+| Sep 16 | +1.6 | +0.19 | 12 | −3.9 | −0.82 |
+| Sep 18* | +0.2 | +0.03 | 17 | 0.0 | −0.01 |
+| Sep 21* | +8.6 | +1.03 | 12 | +4.3 | +0.83 |
+| Sep 23* | +1.3 | +0.22 | 17 | +1.1 | +0.30 |
+
+(* = unseen test days)
+
+| period | latency | ¢/share | $/window | t | ≈ $/day if all 288 windows traded |
+|---|---|---|---|---|---|
+| Aug 19 – Sep 6 | 20 ms | +3.8 | +2.25 | 6.8 | ~$650 |
+| Sep 10 – Sep 23 | 20 ms | +3.5 | +0.46 | 2.5 | ~$130 |
+| Aug 19 – Sep 6 | 50 ms | +3.1 | +1.58 | 5.2 | ~$455 |
+| Sep 10 – Sep 23 | 50 ms | +1.0 | +0.24 | 1.1 | ~$70 |
+
+**Reading.**
+- At 20 ms the **per-share edge is stable** (~3.5–3.8¢) and positive on all 13 days.
+- But the **fills collapsed about 4–5× after Sep 6**, from ~59 to ~13 shares per window, so dollars per window fell about 5×.
+- At 50 ms the recent edge is not significant.
+- It is regime-dependent in *size*, and at 50 ms also in *sign*.
+
 **BTC 15m check.** The same frozen variants were run on 220 recent 15m windows (Sep 10–23).
 - 3 behind + guard: +1.4¢/share but only **+$0.08 per window** (t 0.3, ~6 shares filled per window). The sign flips from day to day.
 - Best variant, 3 behind + guard + fair cap @50 ms: +$0.23 per window (t 0.95).
@@ -208,7 +241,7 @@ These are the defaults now in `bot/config.py` (`BOT_BACK_TICKS=3`, guard 300 ms 
 
 ## 6. What must happen before real money
 
-1. **Host in AWS eu-west-2 (London).** Measure the real event→order-ack latency. If it isn't under ~30–50 ms, don't run it.
+1. **Host in AWS eu-west-1 (Dublin; UK IPs are close-only on the API, see `DEPLOY_AWS.md`).** Measure the real event→order-ack latency. If it isn't under ~30–50 ms, don't run it.
 2. Run **paper mode on that host** for several days, comparing shadow PnL with the archive backtest.
 3. Go live with **5-share clips**, a $20 daily-loss limit and the gate on. Compare live fills with the shadow fills of the same windows; they should match.
 4. Only then size up. The edge is a liquidity premium with finite capacity, and other fast makers compete for it.

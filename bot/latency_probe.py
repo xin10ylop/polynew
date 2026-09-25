@@ -4,7 +4,7 @@
   PROBE_ORDERS=1 python -m bot.latency_probe   # also post+cancel 5 tiny post-only orders far from the market (needs keys)
 
 Rule of thumb from the backtests: event->order-at-engine must be <= ~30-50 ms. From a generic cloud box we
-measured 300-480 ms REST and multi-second feed lags (strategy loses). AWS eu-west-2 (London) is the target."""
+measured 300-480 ms REST and multi-second feed lags (strategy loses). Target host: AWS eu-west-1 (Dublin) -- London/UK IPs are close-only on the Polymarket API."""
 import asyncio
 import json
 import os

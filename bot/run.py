@@ -6,7 +6,7 @@ PnL of the last `gate_k` settled windows is > 0 (the backtest showed maker PnL i
 causal gate switches off in toxic regimes). In paper mode the gate is evaluated but only reported.
 
 Safety: stale/lagging feed guard, BTC lead-move guard (Bybit perp), inventory cap counting in-flight orders,
-dollar cap per market, daily loss halt, KILL file. Deploy close to AWS eu-west-2 (London): the edge needs
+dollar cap per market, daily loss halt, KILL file. Deploy in AWS eu-west-1 (Dublin; UK IPs are close-only on the API): the edge needs
 <= ~50 ms from book event to order at the matching engine (see REPORT.md)."""
 import asyncio
 import collections
