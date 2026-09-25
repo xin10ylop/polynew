@@ -33,7 +33,7 @@ For the current and next 5-minute BTC window:
 ## Hosting (matters more than anything else)
 
 - Polymarket's CLOB runs in AWS eu-west-2 (London), but **UK IP addresses are close-only on the Polymarket API** (no new orders). Run the bot in **eu-west-1 (Dublin)**, which is ~1–2 ms away and API-allowed. Step-by-step: `DEPLOY_AWS.md`.
-- Measured elsewhere: ~13–15 ms feed and ~21–23 ms order round trip from Dublin.
+- Measured on this project's Dublin instance (c7i-flex.large, 2026-09-25): REST round trip p50 22.7 ms (min 20.8), market feed jitter p90 27.7 ms (p99 ~59 ms above min). Both are inside the backtest's 20–50 ms band.
 - From a generic cloud box, this project measured 300–480 ms and multi-second feed lags. At those latencies the strategy **loses** (−2¢/share at 100 ms).
 - Confirm your jurisdiction is allowed to trade on Polymarket.
 
@@ -49,6 +49,12 @@ BOT_MODE=live BOT_SIZE=5 BOT_MAX_IMB=15 BOT_DAILY_LOSS=20 python -m bot.run
 ```
 
 Logs go to `logs/bot/*.jsonl`, with events `fill`, `guard`, `settle` (shadow and live PnL, and the gate state at window open).
+
+Summary of all runs so far (PnL incl. estimated maker rebate, per-day totals, pair cost, gate-on windows), compared with the backtest:
+
+```bash
+python -m bot.summary
+```
 
 ## Known limitations / TODO before scaling
 

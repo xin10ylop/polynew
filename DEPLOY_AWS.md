@@ -27,6 +27,10 @@ This takes about 20 minutes. You only need a web browser; everything happens in 
    cat ~/latency_probe.txt            # speed test: REST p50 should be <= ~20 ms
    tail -f ~/polynew/logs/paper.log   # watch the paper bot (Ctrl+C to stop watching)
    ```
+   To see the paper profit and loss so far, compared with the backtest:
+   ```bash
+   cd ~/polynew && git pull -q && .venv/bin/python -m bot.summary
+   ```
 5. Then skip to **Step 7** below. Paper mode is already running as a service, so you don't need tmux.
    - Check it with `sudo systemctl status polybot-paper`.
    - Stop it with `sudo systemctl stop polybot-paper`.
