@@ -40,6 +40,14 @@ CFGSETS={
   'b3_g300_ld150':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':150},
   'b3_noguard':{'back':3,'W':300,'thr':999,'cool':1500},
  },
+ 'lsrc':{
+  'bn_ld0':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':0},
+  'bn_ld130':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':130},
+  'cb_ld0':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'cb','cld':0},
+  'cb_ld40':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'cb','cld':40},
+  'both_130_40':{'back':3,'W':300,'thr':0.3,'cool':1500,'src':'both','ld':130,'cld':40},
+  'both_130_40_t02':{'back':3,'W':300,'thr':0.2,'cool':1500,'src':'both','ld':130,'cld':40},
+ },
  'test':{
   'b3_g300':{'back':3,'W':300,'thr':0.3,'cool':1500},
   'b2_g300_fair1':{'back':2,'W':300,'thr':0.3,'cool':1500,'fair':0.01},
@@ -67,6 +75,13 @@ def work(cid):
     if not os.path.exists(p): return []
     fu=pd.read_parquet(p); fu=fu[(fu.ms>=(st-90)*1000)&(fu.ms<=(en+5)*1000)]
     lms,lpx=fu.ms.values,fu.px.values
+    pc=f'data/cb_ms/{pd.Timestamp(st,unit="s"):%Y-%m-%d}.parquet'
+    if any(c.get('src','bn')!='bn' for c in CFG.values()):
+        if not os.path.exists(pc): return []
+        cb=pd.read_parquet(pc); cb=cb[(cb.ms>=(st-90)*1000)&(cb.ms<=(en+5)*1000)]
+        cms,cpx=cb.ms.values,cb.px.values
+    else:
+        cms=cpx=np.array([])
     df=pd.concat([pd.read_parquet(f'data/arch/{pd.Timestamp(h,unit="s"):%Y-%m-%dT%H}.parquet',filters=[('cid','==',cid)]) for h in need],ignore_index=True)
     if (df.ev==1).sum()==0: return []
     ev=[]
@@ -93,9 +108,15 @@ def work(cid):
             q,_=fair_up(SP,np.array([st]),np.array([en]),np.array([K]),np.array([s]),SP.sigma_at(np.array([s]),900),0.54,df_t=5)
             qcache[s]=float(q[0])
         return qcache[s]
-    def lead_mv(tt,W):
-        j=np.searchsorted(lms,tt,side='right')-1; i=np.searchsorted(lms,tt-W,side='right')-1
-        return (lpx[j]/lpx[i]-1)*1e4 if (i>=0 and j>=0) else 0.0
+    def lead_mv(tt,W,ms=lms,px=lpx):
+        j=np.searchsorted(ms,tt,side='right')-1; i=np.searchsorted(ms,tt-W,side='right')-1
+        return (px[j]/px[i]-1)*1e4 if (i>=0 and j>=0) else 0.0
+    def guard_mv(tt,cfg):
+        # BTC move seen by the bot at tt: each source is only visible after its transport delay
+        src=cfg.get('src','bn'); mvs=[]
+        if src in ('bn','both'): mvs.append(lead_mv(tt-cfg.get('ld',0),cfg['W']))
+        if src in ('cb','both'): mvs.append(lead_mv(tt-cfg.get('cld',0),cfg['W'],cms,cpx))
+        return max(mvs,key=abs)  # the larger move decides
     out=[]
     for lat in LATS:
         for name,cfg in CFG.items():
@@ -110,7 +131,7 @@ def work(cid):
                 if bb is None or ba is None: return {}
                 back=cfg['back']*TICK; pu=round(bb-back,2); pdn=round(1-ba-back,2)
                 if cfg.get('calm') is not None and abs(lead_mv(tt,60000))>cfg['calm']: return {}
-                mv=lead_mv(tt-cfg.get('ld',0),cfg['W'])  # ld: BTC feed transport delay (ms)
+                mv=guard_mv(tt,cfg)  # ld/cld: Binance/Coinbase feed transport delay (ms)
                 if abs(mv)>=cfg['thr']:
                     if cfg.get('both'):
                         state['pu']=state['pd']=tt+cfg['cool']
