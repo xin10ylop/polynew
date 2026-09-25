@@ -9,6 +9,7 @@ import json
 import os
 import time
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -46,12 +47,14 @@ def events(series_id):
     return out
 
 
-def history(tok, a, b):
-    pts = []
+def history(tok, a, b, fid):
+    ts, ps = [], []
     for s in range(a, b, 6 * 86400):  # chunked: long ranges get downsampled otherwise
-        h = get(HIST, {"market": tok, "startTs": s, "endTs": min(b, s + 6 * 86400), "fidelity": 1})
-        pts += (h or {}).get("history", [])
-    return pts
+        h = get(HIST, {"market": tok, "startTs": s, "endTs": min(b, s + 6 * 86400), "fidelity": fid})
+        for p in (h or {}).get("history", []):
+            ts.append(p["t"])
+            ps.append(p["p"])
+    return np.array(ts, dtype=np.int64), np.array(ps, dtype=np.float32)
 
 
 def main():
@@ -75,15 +78,20 @@ def main():
         E = pd.DataFrame(rows)
         E.to_parquet(f"data/slow/events_{name}.parquet")
         print(name, "events", len(evs), "markets", len(E), flush=True)
-        px = []
+        fid = 1 if name in ("updown_1h", "updown_4h") else 5  # minutes; slow markets don't need 1-minute points
+        mi, tt, pp = [], [], []
         with cf.ThreadPoolExecutor(6) as ex:
-            futs = {ex.submit(history, r.tok_yes, int(r.start), int(r.end) + 60): r.cid for r in E.itertuples()}
+            futs = {ex.submit(history, r.tok_yes, int(r.start), int(r.end) + 60, fid): k for k, r in enumerate(E.itertuples())}
             for i, f in enumerate(cf.as_completed(futs)):
-                px += [(futs[f], p["t"], p["p"]) for p in f.result()]
-                if i % 200 == 0:
-                    print(name, i, len(px), flush=True)
-        pd.DataFrame(px, columns=["cid", "t", "p"]).to_parquet(f"data/slow/px_{name}.parquet")
-        print(name, "price points", len(px), flush=True)
+                t, p = f.result()
+                mi.append(np.full(len(t), futs[f], dtype=np.int32))
+                tt.append(t)
+                pp.append(p)
+                if i % 500 == 0:
+                    print(name, i, sum(len(x) for x in tt), flush=True)
+        pd.DataFrame({"m": np.concatenate(mi), "t": np.concatenate(tt), "p": np.concatenate(pp)}).to_parquet(
+            f"data/slow/px_{name}.parquet")  # m = row index into events_<name>.parquet
+        print(name, "price points", sum(len(x) for x in tt), flush=True)
 
 
 if __name__ == "__main__":
