@@ -33,6 +33,13 @@ CFGSETS={
   'b3_g300':{'back':3,'W':300,'thr':0.3,'cool':1500},
   'b2_g300':{'back':2,'W':300,'thr':0.3,'cool':1500},
  },
+ 'ldelay':{
+  'b3_g300_ld0':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':0},
+  'b3_g300_ld50':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':50},
+  'b3_g300_ld100':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':100},
+  'b3_g300_ld150':{'back':3,'W':300,'thr':0.3,'cool':1500,'ld':150},
+  'b3_noguard':{'back':3,'W':300,'thr':999,'cool':1500},
+ },
  'test':{
   'b3_g300':{'back':3,'W':300,'thr':0.3,'cool':1500},
   'b2_g300_fair1':{'back':2,'W':300,'thr':0.3,'cool':1500,'fair':0.01},
@@ -103,7 +110,7 @@ def work(cid):
                 if bb is None or ba is None: return {}
                 back=cfg['back']*TICK; pu=round(bb-back,2); pdn=round(1-ba-back,2)
                 if cfg.get('calm') is not None and abs(lead_mv(tt,60000))>cfg['calm']: return {}
-                mv=lead_mv(tt,cfg['W'])
+                mv=lead_mv(tt-cfg.get('ld',0),cfg['W'])  # ld: BTC feed transport delay (ms)
                 if abs(mv)>=cfg['thr']:
                     if cfg.get('both'):
                         state['pu']=state['pd']=tt+cfg['cool']
