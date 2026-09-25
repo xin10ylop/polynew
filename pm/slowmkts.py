@@ -66,9 +66,11 @@ def main():
                     prices = json.loads(m.get("outcomePrices") or "[]")
                 except (KeyError, ValueError):
                     continue
+                if not (m.get("endDate") or e.get("endDate")):
+                    continue
                 rows.append(dict(event=e["slug"], cid=m["conditionId"], q=m["question"], tok_yes=toks[0],
                                  start=pd.Timestamp(m.get("startDate") or e.get("startDate")).timestamp(),
-                                 end=pd.Timestamp(m["endDate"]).timestamp(), yes_final=float(prices[0]) if prices else None,
+                                 end=pd.Timestamp(m.get("endDate") or e.get("endDate")).timestamp(), yes_final=float(prices[0]) if prices else None,
                                  volume=float(m.get("volume") or 0), desc=m.get("description", "")[:600]))
         E = pd.DataFrame(rows)
         E.to_parquet(f"data/slow/events_{name}.parquet")
