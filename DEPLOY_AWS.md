@@ -9,6 +9,32 @@ This takes about 20 minutes. You only need a web browser; everything happens in 
 
 ---
 
+## FASTEST WAY: one command in AWS CloudShell (about 2 minutes)
+
+1. Log in at https://console.aws.amazon.com. At the **top right**, set the region to **Europe (Ireland) eu-west-1**.
+2. Click the **CloudShell** icon (a small `>_` square) in the top bar. A terminal opens at the bottom of the page.
+3. Paste this, replacing `YOUR_EMAIL` with your email, and press Enter:
+   ```bash
+   curl -sL https://raw.githubusercontent.com/xin10ylop/polynew/claude/quirky-rubin-rxd14g/scripts/aws_create_polybot.py | python3 - --email YOUR_EMAIL
+   ```
+   It creates the following, and is safe to run twice:
+   - a server named `polybot` in Dublin, using a free-tier type if your account has one;
+   - browser-only SSH access;
+   - a $15/month budget alarm emailed to you;
+   - the bot, installed and **running in paper mode automatically** (no keys, no money).
+4. Open the **Connect** link it prints, choose the **EC2 Instance Connect** tab, and click **Connect**. Wait 3–5 minutes after creation, then run:
+   ```bash
+   cat ~/latency_probe.txt            # speed test: REST p50 should be <= ~20 ms
+   tail -f ~/polynew/logs/paper.log   # watch the paper bot (Ctrl+C to stop watching)
+   ```
+5. Then skip to **Step 7** below. Paper mode is already running as a service, so you don't need tmux.
+   - Check it with `sudo systemctl status polybot-paper`.
+   - Stop it with `sudo systemctl stop polybot-paper`.
+
+---
+
+The manual, step-by-step route follows if you prefer clicking through it yourself.
+
 ## Step 1: Pick the region
 
 1. Log in at https://console.aws.amazon.com
