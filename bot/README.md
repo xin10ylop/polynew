@@ -2,7 +2,7 @@
 
 > **Read `REPORT.md` first.** The edge is real in backtests on archived real order books, but:
 > - it needs **~20–50 ms** from a book event to the order reaching the matching engine;
-> - it is **regime-dependent**: some days lose, hence the regime gate;
+> - it is **regime-dependent**: some days lose, hence the daily loss limit and a quick stop rule;
 > - it has **not** yet been proven with real money.
 >
 > Start with paper mode on the real host, then trade tiny size.
@@ -22,7 +22,7 @@ For the current and next 5-minute BTC window:
 
 | layer | what it does |
 |---|---|
-| Regime gate | A shadow paper engine trades every window. Live quoting is on only while the shadow's mean PnL over the last 12 settled windows is > 0. It stays off for the first hour, while warming up. |
+| Regime gate (optional, off by default) | A shadow paper engine trades every window. With `BOT_USE_GATE=1`, live quoting is on only while the shadow's mean PnL over the last 12 settled windows is > 0. It is off by default because it cut PnL for this variant on Sep 10–23 (REPORT.md §4d); it is still logged. |
 | BTC lead guard | If Bybit BTC perp moves ≥ 0.5 bp within 500 ms, pull the side that the move makes stale for 2 s. |
 | Feed-lag guard | Pull all quotes if market data arrives > 250 ms late (clock-corrected). |
 | Stale-feed guard | Pull all quotes if a market's feed is silent for > 2 s. This covers frozen books and reconnects. |

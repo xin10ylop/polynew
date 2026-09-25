@@ -151,7 +151,6 @@ BOT_MODE=paper BOT_PAPER_LAT_MS=20 python -m bot.run
    ```bash
    BOT_MODE=live BOT_SIZE=5 BOT_MAX_IMB=15 BOT_DAILY_LOSS=20 python -m bot.run
    ```
-   - The bot won't quote live for the first hour; the regime gate warms up first.
    - To stop everything immediately: in a second terminal, `cd ~/polynew && touch KILL`. Remove the file with `rm KILL` to allow quoting again.
 
 ## Step 9: Saving money when you're not using it

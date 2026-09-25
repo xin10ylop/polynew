@@ -1,9 +1,10 @@
 """Deep-maker bot for Polymarket BTC Up/Down 5m.   python -m bot.run   (BOT_MODE=paper|live)
 
 Every market is always traded by a SHADOW paper engine (queue-aware simulated fills, virtual latency).
-The shadow's settled window PnL drives the REGIME GATE: live quoting is allowed only while the mean shadow
-PnL of the last `gate_k` settled windows is > 0 (the backtest showed maker PnL is regime-persistent and this
-causal gate switches off in toxic regimes). In paper mode the gate is evaluated but only reported.
+The shadow's settled window PnL feeds an optional REGIME GATE: with BOT_USE_GATE=1, live quoting is allowed only
+while the mean shadow PnL of the last `gate_k` settled windows is > 0. It is off by default: it helped the older
+2-behind variant, but for the current 3-behind variant it cut PnL on Sep 10-23 (REPORT.md 4d). It is always
+evaluated and logged.
 
 Safety: stale/lagging feed guard, BTC lead-move guard (Bybit perp), inventory cap counting in-flight orders,
 dollar cap per market, daily loss halt, KILL file. Deploy in AWS eu-west-1 (Dublin; UK IPs are close-only on the API): the edge needs
@@ -137,7 +138,8 @@ class Bot:
         # shadow: identical logic, always on (it is the regime detector); uses exchange-time clock
         await self._requote_one(m, "shadow", self.server_now(), feed_ok, now_local)
         if self.live is not None:
-            allowed = feed_ok and self.gate_on() and not self.halted and not os.path.exists(self.cfg.kill_file)
+            gate_ok = self.gate_on() or not self.cfg.use_gate
+            allowed = feed_ok and gate_ok and not self.halted and not os.path.exists(self.cfg.kill_file)
             await self._requote_one(m, "live", int(now_local), allowed, now_local)
 
     async def _requote_one(self, m, which, now_ms, allowed, now_local):
@@ -371,5 +373,5 @@ class Bot:
 if __name__ == "__main__":
     cfg = Config()
     print(f"deep-maker bot mode={cfg.mode} back={cfg.back_ticks} size={cfg.size} shadow_lat={cfg.paper_latency_ms}ms "
-          f"gate_k={cfg.gate_k}", flush=True)
+          f"gate_k={cfg.gate_k} use_gate={cfg.use_gate}", flush=True)
     asyncio.run(Bot(cfg).main())

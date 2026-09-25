@@ -27,7 +27,8 @@ No real money was traded. That is the final step, and it needs the right host (s
 4. **After adapting to the new regime, a small edge survives on unseen data.**
    - Quote **3 ticks** behind on both sides, with a BTC guard that pulls quotes on ≥0.3 bp moves within 300 ms.
    - Out-of-sample over Sep 18, 21 and 23 it made **+3.0¢/share at 20 ms** (t 1.7, bootstrap P(≤0) = 5%) and +1.6¢ at 50 ms. It was positive on all three days.
-   - It is only about **$0.45 per window at 10-share clips (~$130/day)** and does not scale linearly. It is real but modest, and fragile to latency and regime (§4c).
+   - It is only about **$0.45 per window at 10-share clips (~$130/day)**. It is real but modest, and fragile to latency and regime (§4c).
+   - Over a month (§4d), with all losing windows and days included, that is about **+$2.6k (50 ms) to +$3.9k (20 ms) at 10-share clips**, *if the Sep 10–23 regime persists*. The regime gate hurts this variant, so it is now off by default.
 5. **Deliverable:** `bot/` is a paper/live implementation of exactly the backtested logic, with the gate, BTC lead guard, feed-lag and stale-feed guards, and inventory, dollar and daily-loss caps.
    - It must run in **AWS eu-west-1 (Dublin)**, next to the London engine. UK IPs are close-only on Polymarket's API, so London itself can't place orders.
    - From this cloud container the feed arrived 0.3–10 s late, which is exactly the failure mode that kills makers.
@@ -184,7 +185,7 @@ Everything @50 ms was ≈ 0.
 **Conclusion.**
 - A small, **marginally significant** maker edge survives on recent unseen data. It is positive on every unseen day at both 20 and 50 ms.
 - In dollars it is modest: about **$0.45 per 5-minute window at 10-share clips**, or roughly $130/day across all 288 windows.
-- It **does not scale linearly**: per-share edge halves at 100-share clips out-of-sample.
+- Size: the per-share edge in the simulator is about the same at 10, 50 and 100-share clips on matched days (§4d). Dollar PnL, variance and drawdowns all scale roughly with size. How real sweeps react to larger resting orders is not modelled, so scaling is unproven live.
 - It is latency-bound (≤50 ms), and the market has already changed regime once in September.
 - Sep 25 could not be tested: Binance ms BTC data is published the next day.
 
@@ -228,6 +229,47 @@ These are the defaults now in `bot/config.py` (`BOT_BACK_TICKS=3`, guard 300 ms 
 - Best variant, 3 behind + guard + fair cap @50 ms: +$0.23 per window (t 0.95).
 - **No usable edge on 15m.** 15m takers are better informed (see §3.5), so 5m is the only venue with a maker edge.
 
+### 4d. A month of the final variant: losses, bankroll, size, regime gate (`research/r35_month_sim.py`)
+
+**Month simulation.**
+- Setup: 3 behind + guard, 10-share clips.
+  - Each of 30 days draws one real day from Sep 10–23.
+  - Its 288 windows are resampled from that day's backtested windows (losing windows included, maker rebate included).
+  - The −$50 daily halt is applied, and ~$70 of AWS cost is subtracted.
+
+| latency | median month | 10th pct | 90th pct | losing days | worst day (1st pct) | max drawdown (median / 95th pct) |
+|---|---|---|---|---|---|---|
+| 20 ms | **+$3,860** | +$3,000 | +$4,720 | 19% | −$60 | $144 / $227 |
+| 50 ms | **+$2,600** | +$1,750 | +$3,510 | 34% | −$65 | $201 / $338 |
+
+- The simulation captures *bad luck within the current regime*, not a regime change. After Sep 6, dollar PnL per window fell about 5× within days.
+- Nor does it capture the difference between simulated and real fills. Only a live test measures that.
+- Plan for materially less than the table, and stop quickly if live results turn negative.
+
+**Regime gate on this variant (real window order, lag 2).**
+- The gate *cuts* PnL:
+  - 20 ms: ungated +$310 on 678 windows, versus +$136 to +$188 gated for K = 12…144.
+  - 50 ms: ungated +$164, versus −$48 to +$8 gated.
+- It trades only ~30% of windows and mostly misses the good ones: losing windows cluster weakly, so a rolling-mean filter lags the regime.
+- The bot therefore defaults to `BOT_USE_GATE=0`. The gate is still computed and logged.
+
+**Size scaling on matched days** (the simulator fills the full size only when the queue ahead is consumed or the level trades through):
+
+| days | latency | clip | $/window | ¢/share | t | worst window |
+|---|---|---|---|---|---|---|
+| Sep 10–16 | 20 ms | 10 | +0.47 | +4.4 | 1.9 | −$13 |
+| Sep 10–16 | 20 ms | 50 | +2.07 | +4.2 | 1.8 | −$76 |
+| Sep 10–16 | 20 ms | 100 | +4.01 | +4.4 | 1.8 | −$164 |
+| Sep 10–16 | 50 ms | 10 / 50 / 100 | +0.02 / +0.05 / −0.30 | ≈ 0 | ≈ 0 | −$25 / −$133 / −$269 |
+| Sep 18 + 23 | 20 ms | 10 / 100 | +0.13 / +2.21 | +0.8 / +1.6 | 0.4 / 0.7 | −$23 / −$233 |
+
+- In the simulator, per-share edge does not shrink with size. (An earlier note said it "halves at 100 shares"; that compared different day sets.)
+- Risk scales with size too. Bankroll needed, roughly two concurrent windows at the 99th percentile of inventory plus the 95th-percentile drawdown:
+  - ~$600 at 10-share clips;
+  - ~$2.5–3k at 50;
+  - ~$5–6k at 100. Raise `BOT_MAX_USD` and `BOT_DAILY_LOSS` in proportion.
+- Real capacity depends on how many sweeps reach 3 ticks deep and on how other bots react to larger resting orders. Neither is in the data, so size up only in steps validated live.
+
 ## 5. Deliverable: `bot/`
 
 - It uses exactly the backtested quoting logic and the same queue-aware fill model (paper mode).
@@ -243,7 +285,7 @@ These are the defaults now in `bot/config.py` (`BOT_BACK_TICKS=3`, guard 300 ms 
 
 1. **Host in AWS eu-west-1 (Dublin; UK IPs are close-only on the API, see `DEPLOY_AWS.md`).** Measure the real event→order-ack latency. If it isn't under ~30–50 ms, don't run it.
 2. Run **paper mode on that host** for several days, comparing shadow PnL with the archive backtest.
-3. Go live with **5-share clips**, a $20 daily-loss limit and the gate on. Compare live fills with the shadow fills of the same windows; they should match.
+3. Go live with **5-share clips** and a $20 daily-loss limit. Compare live fills with the shadow fills of the same windows; they should match.
 4. Only then size up. The edge is a liquidity premium with finite capacity, and other fast makers compete for it.
 
 ## 7. Repository map
