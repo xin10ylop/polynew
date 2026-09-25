@@ -25,8 +25,11 @@ class Config:
     guard_bp: float = _f("BOT_GUARD_BP", 0.5)            # pull the stale side if BTC moves >= this many bp within window
     guard_cool_ms: int = _f("BOT_GUARD_COOL_MS", 2000)   # keep that side pulled this long
     guard_on: int = _f("BOT_GUARD", 1)
+    max_feed_lag_ms: int = _f("BOT_MAX_LAG_MS", 250)   # pull quotes if market data arrives later than this
     stale_ms: int = _f("BOT_STALE_MS", 2000)       # no quotes if the market feed is silent this long (frozen/stale book)
     max_usd_per_market: float = _f("BOT_MAX_USD", 150.0)  # dollar cap on cost of inventory per market
+    gate_k: int = _f("BOT_GATE_K", 12)             # regime gate: mean shadow PnL of last K settled windows must be > 0
+    gate_warmup_allow: int = _f("BOT_GATE_WARMUP", 0)  # 1 = allow live quoting before K shadow windows exist
     kill_file: str = "KILL"                        # create this file to stop quoting and cancel all
     log_dir: str = "logs/bot"
     # live credentials (only used in live mode) -- read from environment / .env, never hard-code

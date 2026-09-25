@@ -5,6 +5,11 @@ import numpy as np, pandas as pd
 from multiprocessing import Pool
 dur_f=sys.argv[1]; LATS=[int(x) for x in sys.argv[2].split(',')]; NW=int(sys.argv[3]) if len(sys.argv)>3 else 3
 CFGSETS={'default':{'join':{'back':0},'back1':{'back':1},'back2':{'back':2},'back1_guard':{'back':1,'W':500,'thr':0.5,'cool':2000}},
+ 'final':{'join':{'back':0},'back1':{'back':1},'back2':{'back':2},'back1_g500':{'back':1,'W':500,'thr':0.5,'cool':2000},
+           'back2_g300':{'back':2,'W':300,'thr':0.3,'cool':1500},'back2_sz25':{'back':2,'sz':25.0},'back2_sz50':{'back':2,'sz':50.0}},
+ 'final2':{'back2':{'back':2},'back1_g500':{'back':1,'W':500,'thr':0.5,'cool':2000},'back2_g300':{'back':2,'W':300,'thr':0.3,'cool':1500},'back2_sz25':{'back':2,'sz':25.0}},
+ 'queue':{'back2':{'back':2},'back2_qm1.5':{'back':2,'qm':1.5},'back2_qm2':{'back':2,'qm':2.0},'back1_g500':{'back':1,'W':500,'thr':0.5,'cool':2000},
+           'back1_g500_qm1.5':{'back':1,'W':500,'thr':0.5,'cool':2000,'qm':1.5}},
  'guard150':{'join':{'back':0},'back2':{'back':2},'join_g300_t0.3':{'back':0,'W':300,'thr':0.3,'cool':1500},'join_g500_t0.5':{'back':0,'W':500,'thr':0.5,'cool':2000},
              'back1_g300_t0.3':{'back':1,'W':300,'thr':0.3,'cool':1500},'back1_g500_t0.5':{'back':1,'W':500,'thr':0.5,'cool':2000},'back2_g300_t0.3':{'back':2,'W':300,'thr':0.3,'cool':1500}}}
 CFG=CFGSETS[os.environ.get('CFGSET','default')]
@@ -61,11 +66,11 @@ def work(cid):
                         mv=(lpx[j]/lpx[i]-1)*1e4
                         if mv>=cfg['thr']: state['pd']=tt+cfg['cool']
                         if mv<=-cfg['thr']: state['pu']=tt+cfg['cool']
-                imb=pos[True]-pos[False]; o={}
-                if tt>=state['pu'] and pu>=0.03 and imb<30: o['up']=(pu,SZ)
-                if tt>=state['pd'] and pdn>=0.03 and -imb<30: o['dn']=(pdn,SZ)
+                imb=pos[True]-pos[False]; o={}; sz=cfg.get('sz',SZ); mi=cfg.get('maxi',3*sz)
+                if tt>=state['pu'] and pu>=0.03 and imb<mi: o['up']=(pu,sz)
+                if tt>=state['pd'] and pdn>=0.03 and -imb<mi: o['dn']=(pdn,sz)
                 return o
-            sim=MakerSim(place_lat=lat,cancel_lat=lat,decide_every=50)
+            sim=MakerSim(place_lat=lat,cancel_lat=lat,decide_every=50,queue_mult=cfg.get('qm',1.0))
             f=sim.run(ev,pol,st*1000,en*1000,max_pos=10**9)
             if len(f)==0:
                 out.append((cid,r.dur,st,lat,name,0,0.0,0.0,0.0,sim.n_place,sim.n_cancel)); continue

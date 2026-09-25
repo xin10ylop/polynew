@@ -69,7 +69,8 @@ class MakerSim:
     """Drive with a quoting policy: policy(t_ms, book) -> dict(up=(price,size)|None, dn=(price,size)|None)
     where price is the price WE pay for that side (Down price M -> Up-ask level 1-M)."""
 
-    def __init__(self, place_lat=150, cancel_lat=150, decide_every=200):
+    def __init__(self, place_lat=150, cancel_lat=150, decide_every=200, queue_mult=1.0):
+        self.queue_mult = queue_mult
         self.n_place = 0
         self.n_cancel = 0
         self.place_lat = place_lat
@@ -95,7 +96,7 @@ class MakerSim:
             for o in orders:
                 if o.q_ahead < 0 and ts >= o.live_at and o.cancel_at > o.live_at:
                     lvl = book.bids if o.side_up else book.asks
-                    o.q_ahead = lvl.get(o.level, 0.0)
+                    o.q_ahead = lvl.get(o.level, 0.0) * self.queue_mult
             if kind == 0:
                 book.bids, book.asks = dict(pl[0]), dict(pl[1])
                 have_book = True
@@ -109,7 +110,7 @@ class MakerSim:
                 # cancels ahead: queue can't exceed displayed size
                 for o in orders:
                     if o.q_ahead >= 0 and o.side_up == is_bid and o.level == p and ts < o.cancel_at:
-                        o.q_ahead = min(o.q_ahead, max(sz, 0.0))
+                        o.q_ahead = min(o.q_ahead, max(sz, 0.0) * self.queue_mult)
             elif kind == 2:
                 on_bid, p, sz = pl
                 for o in orders:
