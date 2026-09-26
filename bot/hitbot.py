@@ -3,6 +3,8 @@
   python -m bot.hitbot              # run forever: a pass every 5 min; each strike acts at most once per 6 h
   python -m bot.hitbot --once       # a single pass
   python -m bot.hitbot --summary    # paper positions and P&L so far
+  python -m bot.hitbot --test-order # ONE real $5 order to verify keys/units/fees end to end (needs POLY_* env keys)
+  HIT_MODE=live python -m bot.hitbot   # real money (only after paper + test order check out)
 
 Model and rule are the ones backtested in research/r40_hit.py and r41_hit_portfolio.py:
   q = P(touch before the end) = min(1, 2 * P(T4 > z * sqrt(2))),  z = |ln(X / S)| / sqrt(var_1m * minutes_left)
@@ -10,8 +12,12 @@ Model and rule are the ones backtested in research/r40_hit.py and r41_hit_portfo
   Decision: cost = order-book mid + 2c; buy NO if (1 - q) - cost - fee > 0.10, only with >= 2 days left in the week.
   (YES buys and weekend entries did not hold up out-of-sample; see REPORT.md 4g. HIT_SIDES=YES,NO re-enables YES.)
   Size: $250 per clip, at most $1,000 per strike, at most one clip per strike per 6 h (first after 1 h of market life).
-Paper fills walk the real order book for the clip; a clip is skipped if its average price is more than 3c above the
-mid. Positions are held to resolution and settled from the market's own outcome."""
+Execution (paper and live identical): a fill-and-kill BUY limit order at the token's book mid + 3c. It never rests on
+the book, never pays above the limit, and a partial fill is recorded as partial (under $25 filled = skipped).
+Paper mode walks the live displayed asks; live mode sends the order through py-clob-client. Positions are held to
+resolution (no selling) and settled from the market's own outcome. `touch KILL` stops new buys.
+The 0.500 placeholder midpoint of a market with no quotes cannot trigger trades: decisions use the live book, and
+one-sided or empty books are skipped."""
 import argparse
 import json
 import math
@@ -34,8 +40,10 @@ def _env(name, default):
 CFG = dict(clip=_env("HIT_CLIP", 250.0), max_pos=_env("HIT_MAX", 1000.0), thr=_env("HIT_THR", 0.10),
            cost=_env("HIT_COST", 0.02), max_slip=_env("HIT_MAX_SLIP", 0.03), every_h=_env("HIT_EVERY_H", 6.0),
            min_age_h=_env("HIT_MIN_AGE_H", 1.0), min_days_left=_env("HIT_MIN_DAYS_LEFT", 2.0),
-           sides=_env("HIT_SIDES", "NO"), log_dir=_env("HIT_LOG_DIR", "logs/hitbot"))
+           sides=_env("HIT_SIDES", "NO"), log_dir=_env("HIT_LOG_DIR", "logs/hitbot"), kill_file="KILL",
+           mode=_env("HIT_MODE", "paper"))
 S = requests.Session()
+EXEC = None  # set in main(): PaperExec() or LiveExec()
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -155,6 +163,55 @@ def vwap_buy(asks, usd):
     return 0.0, None
 
 
+def buy_up_to(asks, usd, limit):
+    """What a fill-and-kill BUY at `limit` for `usd` gets from these asks: (shares, dollars, average price).
+    Never pays more than `limit` per share; takes only what is displayed (partial fills are partial)."""
+    sh = spent = 0.0
+    for p, s in asks:
+        if p > limit + 1e-9 or spent >= usd - 1e-6:
+            break
+        take = min(s, (usd - spent) / p)
+        sh += take
+        spent += take * p
+    return sh, spent, (spent / sh if sh else None)
+
+
+class PaperExec:
+    mode = "paper"
+
+    def buy(self, token, asks, usd, limit):
+        sh, spent, avg = buy_up_to(asks, usd, limit)
+        return dict(shares=sh, usd=spent, avg=avg, fee=sh * fee(avg) if avg else 0.0)
+
+
+class LiveExec:
+    """Real orders via the official py-clob-client: a fill-and-kill (FAK) BUY limit order at our limit price.
+    Fee rate, tick size and neg-risk flag are resolved by the client; price is floored to the tick grid; size is in
+    SHARES (2 decimals, minimum 5). Requires POLY_PRIVATE_KEY, POLY_FUNDER, POLY_SIG_TYPE in the environment."""
+    mode = "live"
+
+    def __init__(self):
+        from py_clob_client.client import ClobClient
+        self.c = ClobClient(CLOB, key=os.environ["POLY_PRIVATE_KEY"], chain_id=137,
+                            signature_type=int(os.environ.get("POLY_SIG_TYPE", "1")), funder=os.environ["POLY_FUNDER"])
+        self.c.set_api_creds(self.c.create_or_derive_api_creds())
+
+    def buy(self, token, asks, usd, limit):
+        from py_clob_client.clob_types import OrderArgs, OrderType
+        tick = float(self.c.get_tick_size(token))
+        px = round(math.floor(limit / tick + 1e-9) * tick, 4)  # never above our limit
+        sh_expected, _, _ = buy_up_to(asks, usd, px)
+        size = math.floor(sh_expected * 100) / 100
+        if size < 5:
+            return dict(shares=0.0, usd=0.0, avg=None, fee=0.0, note="below 5-share minimum")
+        resp = self.c.post_order(self.c.create_order(OrderArgs(token_id=token, price=px, size=size, side="BUY")),
+                                 OrderType.FAK)
+        spent = float(resp.get("makingAmount") or 0)  # USDC paid
+        got = float(resp.get("takingAmount") or 0)  # shares received
+        avg = spent / got if got else None
+        return dict(shares=got, usd=spent, avg=avg, fee=got * fee(avg) if avg else 0.0, limit=px, size=size, resp=resp)
+
+
 def market_outcome(cid):
     m = get("https://gamma-api.polymarket.com/markets", {"condition_ids": cid})
     if not m or not m[0].get("closed"):
@@ -215,21 +272,29 @@ def run_once(st):
         if side is None:
             continue
         usd = min(CFG["clip"], CFG["max_pos"] - p["usd"])
-        if usd < 5:
+        if usd < 25:
             continue
-        token_asks = asks if side == "YES" else book(m["no"])[1]
-        sh, avg = vwap_buy(token_asks, usd)
-        ref = mid if side == "YES" else 1 - mid
-        if avg is None or avg > ref + CFG["max_slip"]:
-            st.log("skip_slippage", cid=m["cid"], side=side, avg=avg, ref=ref)
+        tok = m["yes"] if side == "YES" else m["no"]
+        tb, ta = (bids, asks) if side == "YES" else book(m["no"])
+        if not tb or not ta:
+            st.log("skip_book", cid=m["cid"], side=side, why="one-sided book")
             continue
-        f = sh * fee(avg)
-        p["usd"] += usd
-        p["fees"] += f
-        p["sh_yes" if side == "YES" else "sh_no"] += sh
-        st.log("fill", cid=m["cid"], q_mkt=m["q"], side=side, usd=usd, shares=sh, avg=avg, fee=f, mid=mid, model=q)
-        print(f"  PAPER BUY {side:3s} ${usd:.0f} @ {avg:.3f} ({sh:.0f} sh) | {m['q'][:60]} | model {q:.3f} mid {mid:.3f}",
-              flush=True)
+        limit = (tb[0][0] + ta[0][0]) / 2 + CFG["max_slip"]  # pay at most the token's book mid + 3c
+        st.log("book", cid=m["cid"], side=side, bids=tb[:8], asks=ta[:8], limit=limit)
+        if os.path.exists(CFG["kill_file"]):
+            st.log("skip_kill", cid=m["cid"])
+            continue
+        r = EXEC.buy(tok, ta, usd, limit)
+        if r["usd"] < 25:
+            st.log("skip_thin", cid=m["cid"], side=side, limit=limit, got_usd=r["usd"], note=r.get("note"))
+            continue
+        p["usd"] += r["usd"]
+        p["fees"] += r["fee"]
+        p["sh_yes" if side == "YES" else "sh_no"] += r["shares"]
+        st.log("fill", mode=EXEC.mode, cid=m["cid"], q_mkt=m["q"], side=side, usd=r["usd"], shares=r["shares"],
+               avg=r["avg"], fee=r["fee"], limit=limit, mid=mid, model=q, resp=r.get("resp"))
+        print(f"  {EXEC.mode.upper()} BUY {side:3s} ${r['usd']:.0f} @ {r['avg']:.3f} ({r['shares']:.0f} sh) | "
+              f"{m['q'][:58]} | model {q:.3f} mid {mid:.3f}", flush=True)
     # settle positions whose market is no longer active (touched early, or the week ended)
     active = {m["cid"] for m in mkts}
     for cid, p in list(st.s["pos"].items()):
@@ -284,15 +349,40 @@ def summary(st):
           "about +$1,100 to +$1,400/week on average, 23% losing weeks, worst week about -$2,000.")
 
 
+def test_order(st, usd=5.0):
+    """One real $5 NO buy (fill-and-kill at the best ask) on the active strike with the tightest NO spread, to verify
+    keys, order units, tick size, fee and fill reporting end to end. Prints the exchange's raw response."""
+    ex = LiveExec()
+    best = None
+    for m in active_markets():
+        b, a = book(m["no"])
+        if b and a and a[0][0] * a[0][1] >= 3 * usd and 0.05 < a[0][0] < 0.95:
+            if best is None or a[0][0] - b[0][0] < best[0]:
+                best = (a[0][0] - b[0][0], m, a)
+    if best is None:
+        print("no suitable market right now")
+        return
+    _, m, a = best
+    print(f"TEST ORDER: buy ${usd:.0f} of NO on '{m['q']}' at best ask {a[0][0]} (fill-and-kill)")
+    r = ex.buy(m["no"], a, usd, a[0][0])
+    st.log("test_order", cid=m["cid"], q_mkt=m["q"], **{k: v for k, v in r.items()})
+    print("result:", json.dumps(r, indent=1, default=str))
+
+
 def main():
+    global EXEC
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--summary", action="store_true")
+    ap.add_argument("--test-order", action="store_true", help="one real $5 order (needs keys)")
     a = ap.parse_args()
     st = State(CFG["log_dir"])
     if a.summary:
         return summary(st)
-    print(f"hitbot PAPER mode {CFG}", flush=True)
+    if a.test_order:
+        return test_order(st)
+    EXEC = LiveExec() if CFG["mode"] == "live" else PaperExec()
+    print(f"hitbot {EXEC.mode.upper()} mode {CFG}", flush=True)
     while True:
         try:
             run_once(st)

@@ -407,6 +407,53 @@ Portfolio ($250 / $1,000, 2¢ costs):
 - It needs real capital: about $5–8k to run the $250/$1,000 sizing.
 - The monthly series (14 months) is not reliable and is not used.
 
+## 4h. Execution audit of the weekly "hit" strategy (`r42`–`r44`): the §4g numbers were inflated
+
+**1. Placeholder prices (a fill illusion; fixed).**
+- A new market's midpoint history reads exactly **0.500** until real quotes arrive, typically for about 1 hour.
+- 236 of 751 backtest fills (31%) were priced off that placeholder. They carried **half of the backtest profit**: $37.8k of $77k, at +64% per dollar.
+- They are now excluded: 197 of 886 NO signals. The bot can't trade on a placeholder, because it decides and executes on the live book and skips empty or one-sided books.
+
+**2. Real order books at signal time** (PendulumFlow L2, 62 signals in archived hours, Aug 18 – Sep 18):
+- The real NO book midpoint equals the backtest's (1 − midpoint), with a median difference of 0.00¢.
+- Where a full book snapshot exists within 30 min (32 signals):
+  - NO spread: median 1¢, 90th pct 3¢;
+  - NO ask depth within mid + 3¢: median **$4,808**, 10th pct $1,306;
+  - a real $250 walk cost **1.2¢ less** than the backtest assumed (median; 90th pct +0.95¢);
+  - 30 of 32 were fillable under the mid + 3¢ guard.
+- For 27 other signals only top-of-book changes exist: the spread was ≤ 3¢ in 63%.
+- **About two-thirds of real signals are tradable.** When they are, the backtest's 2¢ cost is conservative.
+
+**3. Trade-tape lower bound** (`r43`): crediting a fill only if other traders actually bought NO at ≤ our limit within 30 / 120 min, at their price and volume:
+- about +$200 / +$310 per week on test weeks;
+- +21–37% per dollar traded.
+
+This understates capacity, because resting asks nobody lifted aren't visible in a tape.
+
+**Corrected estimate** (placeholders removed, 65% of signals fillable at random, otherwise §4g rules):
+
+| sizing | per week, test half (t) | per week, train half | Jul / Aug / Sep (3 wks) 2026 | worst week |
+|---|---|---|---|---|
+| $250 clip, $1,000 per strike | **+$524** (3.5) | +$757 | +$2.5k / +$3.3k / +$0.9k | −$1,125 |
+| $500 clip, $2,000 per strike | **+$1,049** (3.5) | +$1,514 | +$5.0k / +$6.7k / +$1.8k | −$2,250 |
+
+The §4g per-week figures (+$1,157 … +$1,399 at $250/$1,000) are **withdrawn**.
+
+**Checks against the user's earlier lessons from a losing bot.**
+- **Fills.** Taker only, as a fill-and-kill limit at the token's mid + 3¢. It never rests and never pays above the limit; partial fills are recorded as partial.
+- **Resting bids below the ask.** None.
+- **96–99¢ depth.** NO is bought at 16–80¢ (median about 55¢). A ≥ 10¢ edge is impossible above about 90¢.
+- **Selling.** Never. Positions are held to resolution; winning NO shares are redeemed (claimed) after the week.
+- **Dollars vs shares.** Live orders are sized in shares (2 decimals, minimum 5). Price is floored to the tick grid. Fee rate and neg-risk come from py-clob-client.
+- **Speed.** Not needed: entries 30–60 min late keep most of the edge.
+- **Stale books.** Decisions use the live REST book at decision time, never the price history. The book is logged with every decision.
+
+**Still unproven until real money:**
+- the exchange's actual fee deduction and fill reporting on a real order;
+- any taker delay in these markets.
+
+`python -m bot.hitbot --test-order` sends one $5 fill-and-kill order to check these end to end.
+
 ## 5. Deliverable: `bot/`
 
 - It uses exactly the backtested quoting logic and the same queue-aware fill model (paper mode).
