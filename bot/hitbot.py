@@ -345,8 +345,9 @@ def summary(st):
     for ev, (usd, pnl, n) in sorted(weeks.items()):
         print(f"  {ev:60s} strikes {n:2d} cost ${usd:8.2f} PnL {pnl:+9.2f}")
     print(f"  total settled PnL {sum(w[1] for w in weeks.values()):+,.2f}")
-    print("\nbacktest reference at this sizing (NO only, >= 2 days left; Jul 2025 - Sep 2026, 60 weeks): "
-          "about +$1,100 to +$1,400/week on average, 23% losing weeks, worst week about -$2,000.")
+    print("\nbacktest reference at this sizing, after the execution audit (REPORT.md 4h): about +$500/week expected "
+          "(+$200 to +$750 depending on how many signals find a tradable book), about 1 week in 4 losing, "
+          "worst week about -$1,100 to -$2,000.")
 
 
 def test_order(st, usd=5.0):
