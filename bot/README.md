@@ -1,3 +1,22 @@
+# Weekly "hit" strategy paper bot (current candidate)
+
+`bot/hitbot.py` trades the weekly "What price will Bitcoin hit" markets. The backtest is in REPORT.md §4g.
+
+- Every 5 minutes it reads the active weekly markets, Binance 1-minute BTC data (`data-api.binance.vision`) and the real order books.
+- It buys **NO** where the volatility model says the touch probability is overpriced by more than 10¢ after costs.
+- Sizing: $250 clips, at most $1,000 per strike, at most one clip per strike per 6 h, only with at least 2 days left in the week.
+- **Paper only.** No keys, no money.
+
+```bash
+python -m bot.hitbot              # run (paper)
+python -m bot.hitbot --summary    # positions, mark-to-market, settled P&L by week vs backtest
+python tests/test_hitbot_parity.py  # the bot's model equals the backtest's model
+```
+
+Settings via env: `HIT_CLIP`, `HIT_MAX`, `HIT_THR`, `HIT_SIDES`, `HIT_MIN_DAYS_LEFT`. Logs go to `logs/hitbot/` (`events.jsonl`, `state.json`).
+
+---
+
 # Deep-maker bot: Polymarket BTC Up/Down 5m
 
 > **Read `REPORT.md` first.** The edge is real in backtests on archived real order books, but:

@@ -384,6 +384,23 @@ The simulation charges 2.0¢ (and 3.5¢ in the harsh run). NO-buy volume in thos
 - **With 3.5¢ total costs:** +$1,105 per week.
 - **With $500 clips / $3,000 per strike:** +$2,399 per week, $5.7k average capital, $22k peak.
 
+**Refinement: NO only, ≥ 2 days left.** Chosen after the split, but it agrees in both halves and matches the mechanism.
+- YES buys: train +20.4¢, test **−2.1¢**.
+- Weekend entries: train +9.1¢, test −6.4¢. The model ignores quieter weekends.
+- NO with ≥ 2 days left: train +17.5¢ (t 2.9), test **+23.5¢ (t 5.0)**.
+
+Portfolio ($250 / $1,000, 2¢ costs):
+
+| | per week | t | losing weeks | worst week |
+|---|---|---|---|---|
+| train | +$1,168 | 3.7 | 7 of 30 | |
+| test | **+$1,399** | 5.4 | 7 of 30 | −$1,966 |
+| test, harsh costs (3.5¢) | +$1,270 | 5.6 | | −$1,320 |
+
+- Capital in use: $2.4k mean, $8k peak.
+- Recent months: 2026-06 +$5,955; 07 +$5,789; 08 +$8,514; 09 (3 weeks to Sep 20) +$168.
+- This is the rule in `bot/hitbot.py`.
+
 **Caveats.**
 - This is a behavioural mispricing in a retail market. It can shrink if others trade it.
 - One bad week can cost about one to two good weeks.
