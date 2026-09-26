@@ -24,7 +24,7 @@ StandardError=append:/home/ubuntu/polynew/logs/hitbot.log
 WantedBy=multi-user.target
 UNIT
 sudo systemctl daemon-reload
-sudo systemctl enable --now polybot-hit
+sudo systemctl enable polybot-hit && sudo systemctl restart polybot-hit
 sleep 20
 echo "--- service status:"; systemctl is-active polybot-hit
 echo "--- last log lines:"; tail -5 logs/hitbot.log
