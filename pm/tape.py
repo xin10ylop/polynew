@@ -15,7 +15,7 @@ S = requests.Session()
 
 def fetch(cid):
     out, off = [], 0
-    while off <= 50_000:
+    while off <= 10_000:  # data-api rejects offsets above 10,000
         for k in range(5):
             try:
                 r = S.get(URL, params={"market": cid, "limit": 500, "offset": off}, timeout=30)

@@ -33,7 +33,7 @@ C["placeholder"] = (C.mid.round(4) == 0.5) & ~C.book_live
 # NO-equivalent taker buys: bought No at p, or sold Yes at p (== buying No at 1 - p)
 T["no_px"] = np.where(T.outcome.str.lower() == "no", T.price, 1 - T.price)
 T["no_buy"] = ((T.outcome.str.lower() == "no") & (T.side == "BUY")) | ((T.outcome.str.lower() == "yes") & (T.side == "SELL"))
-T["usd"] = T.size * T.no_px
+T["usd"] = T["size"] * T.no_px  # the column, not DataFrame.size (audit 4i)
 NB = T[T.no_buy].sort_values(["cid", "ts"])
 by_cid = {c: (g.ts.values, g.no_px.values, g.usd.values) for c, g in NB.groupby("cid")}
 

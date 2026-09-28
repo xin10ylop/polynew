@@ -40,7 +40,10 @@ def _env(name, default):
 CFG = dict(clip=_env("HIT_CLIP", 250.0), max_pos=_env("HIT_MAX", 1000.0), thr=_env("HIT_THR", 0.10),
            cost=_env("HIT_COST", 0.02), max_slip=_env("HIT_MAX_SLIP", 0.03), every_h=_env("HIT_EVERY_H", 6.0),
            min_age_h=_env("HIT_MIN_AGE_H", 1.0), min_days_left=_env("HIT_MIN_DAYS_LEFT", 2.0),
-           sides=_env("HIT_SIDES", "NO"), log_dir=_env("HIT_LOG_DIR", "logs/hitbot"), kill_file="KILL",
+           sides=_env("HIT_SIDES", "NO"), log_dir=_env("HIT_LOG_DIR", "logs/hitbot"),
+           kill_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "KILL"),
+           max_open=_env("HIT_MAX_OPEN", 3000.0), max_spread=_env("HIT_MAX_SPREAD", 0.04),
+           max_btc_age_s=_env("HIT_MAX_BTC_AGE_S", 180.0),
            mode=_env("HIT_MODE", "paper"))
 S = requests.Session()
 EXEC = None  # set in main(): PaperExec() or LiveExec()
@@ -94,12 +97,14 @@ def klines(start_ms):
 
 
 class BTC:
-    """Last 8+ days of closed 1-minute candles, EWMA variance (1-day half-life), running highs/lows."""
+    """Last 8+ days of 1-minute candles: EWMA variance (1-day half-life) and S from CLOSED candles only; touch checks
+    also include the still-open candle (a wick in the current minute counts)."""
 
     def __init__(self, since_ms):
         now_ms = now_s() * 1000
-        k = [c for c in klines(min(since_ms, now_ms - 8 * 86400_000)) if c[4] < now_ms]  # closed candles only
-        self.k = k
+        allk = klines(min(since_ms, now_ms - 8 * 86400_000))
+        k = [c for c in allk if c[4] < now_ms]  # closed candles
+        self.k_all = allk
         a = 1 - 0.5 ** (1 / 1440)
         var, prev = 0.0, None
         for c in k:
@@ -110,9 +115,10 @@ class BTC:
         self.var = var
         self.S = k[-1][3]
         self.t_last = k[-1][4] / 1000
+        self.age_s = now_s() - self.t_last  # how old the last closed candle is
 
     def extreme_since(self, start_s, up):
-        xs = [c[1] if up else c[2] for c in self.k if c[0] >= start_s * 1000]
+        xs = [c[1] if up else c[2] for c in self.k_all if c[0] + 60_000 > start_s * 1000]  # candles overlapping the window
         return (max(xs) if up else min(xs)) if xs else None
 
     def q_touch(self, X, end_s):
@@ -129,18 +135,43 @@ def parse_strike(q):
     return x * 1000 if m.group(2) else x
 
 
-def active_markets():
+def window_start(desc, listed, end):
+    """Start of the touch-monitoring window per the market's own rules text.
+    'from the creation of this market' -> listing time; 'from 12:00 AM ET on the first date' -> Monday 00:00 ET, i.e.
+    one week before the end (minus 1 h to stay safe across DST changes). Unknown wording -> None (market skipped)."""
+    d = (desc or "").lower()
+    if "creation of this market" in d:
+        return listed
+    if "12:00 am et" in d:
+        return min(listed, end - 7 * 86400 - 3600)
+    return None
+
+
+def _ts(x):
+    return datetime.fromisoformat(x.replace("Z", "+00:00")).timestamp()
+
+
+def active_markets(log=None):
     out = []
-    for e in get(GAMMA, {"series_id": SERIES_ID, "closed": "false", "limit": 20}):
+    for e in get(GAMMA, {"series_id": SERIES_ID, "closed": "false", "limit": 50}):
         for m in e.get("markets", []):
-            if m.get("closed") or not m.get("acceptingOrders", True):
-                continue
-            yes, no = json.loads(m["clobTokenIds"])
-            q = m["question"]
-            out.append(dict(cid=m["conditionId"], q=q, X=parse_strike(q), up="dip" not in q.lower(),
-                            start=datetime.fromisoformat((m.get("startDate") or e["startDate"]).replace("Z", "+00:00")).timestamp(),
-                            end=datetime.fromisoformat((m.get("endDate") or e["endDate"]).replace("Z", "+00:00")).timestamp(),
-                            yes=yes, no=no, event=e["slug"]))
+            try:
+                if m.get("closed") or not m.get("acceptingOrders", True):
+                    continue
+                yes, no = json.loads(m["clobTokenIds"])
+                q = m["question"]
+                listed = _ts(m.get("startDate") or e["startDate"])
+                end = _ts(m.get("endDate") or e["endDate"])
+                ws = window_start(m.get("description") or e.get("description"), listed, end)
+                if ws is None:
+                    if log:
+                        log("skip_rules", cid=m.get("conditionId"), q_mkt=q, why="unknown monitoring-window wording")
+                    continue
+                out.append(dict(cid=m["conditionId"], q=q, X=parse_strike(q), up="dip" not in q.lower(),
+                                start=listed, wstart=ws, end=end, yes=yes, no=no, event=e["slug"]))
+            except (KeyError, ValueError, TypeError, AttributeError) as ex:  # one malformed market must not stop the bot
+                if log:
+                    log("skip_malformed", cid=m.get("conditionId"), err=repr(ex)[:200])
     return out
 
 
@@ -212,12 +243,25 @@ class LiveExec:
         return dict(shares=got, usd=spent, avg=avg, fee=got * fee(avg) if avg else 0.0, limit=px, size=size, resp=resp)
 
 
+def gamma_market(cid):
+    """Gamma market by condition id. Gamma omits closed markets unless closed=true is passed."""
+    for extra in ({}, {"closed": "true"}):
+        m = get("https://gamma-api.polymarket.com/markets", {"condition_ids": cid, **extra})
+        if m:
+            return m[0]
+    return None
+
+
 def market_outcome(cid):
-    m = get("https://gamma-api.polymarket.com/markets", {"condition_ids": cid})
-    if not m or not m[0].get("closed"):
+    """1.0 / 0.0 once the market is closed AND resolved (outcome price within 1c of 0 or 1); otherwise None."""
+    m = gamma_market(cid)
+    if not m or not m.get("closed"):
         return None
-    p = json.loads(m[0].get("outcomePrices") or "[]")
-    return float(p[0]) if p else None
+    p = json.loads(m.get("outcomePrices") or "[]")
+    if not p:
+        return None
+    y = float(p[0])
+    return 1.0 if y >= 0.99 else (0.0 if y <= 0.01 else None)
 
 
 # ----------------------------------------------------------------------------- state and logging
@@ -239,62 +283,86 @@ class State:
 
 
 # ----------------------------------------------------------------------------- one pass
+def _decide_and_trade(st, m, btc, open_usd):
+    """One strike: decide per the rule and (paper/live) buy. Returns dollars added."""
+    p = st.s["pos"].setdefault(m["cid"], {"q": m["q"], "event": m["event"], "end": m["end"], "usd": 0.0,
+                                          "fees": 0.0, "sh_yes": 0.0, "sh_no": 0.0, "last": 0})
+    age_h = (now_s() - m["start"]) / 3600
+    if (age_h < CFG["min_age_h"] or now_s() - p["last"] < CFG["every_h"] * 3600
+            or m["end"] - now_s() < CFG["min_days_left"] * 86400):
+        return 0.0
+    ext = btc.extreme_since(m["wstart"], m["up"])
+    if ext is not None and ((m["up"] and ext >= m["X"]) or (not m["up"] and ext <= m["X"])):
+        return 0.0  # already touched inside the rules' window: the market resolves YES
+    bids, asks = book(m["yes"])
+    if not bids or not asks:
+        return 0.0
+    mid = (bids[0][0] + asks[0][0]) / 2
+    if not 0.003 < mid < 0.997:
+        return 0.0
+    if asks[0][0] - bids[0][0] > CFG["max_spread"]:
+        st.log("skip_wide", cid=m["cid"], bid=bids[0][0], ask=asks[0][0])  # empty/one-sided book: mid is not a price
+        return 0.0
+    q = btc.q_touch(m["X"], m["end"])
+    e_yes = q - (mid + CFG["cost"]) - fee(mid)
+    e_no = (1 - q) - ((1 - mid) + CFG["cost"]) - fee(1 - mid)
+    side = "YES" if e_yes > CFG["thr"] else ("NO" if e_no > CFG["thr"] else None)
+    if side not in CFG["sides"].split(","):
+        side = None
+    st.log("decide", cid=m["cid"], q_mkt=m["q"], S=btc.S, X=m["X"], mid=mid, model=q, e_yes=e_yes, e_no=e_no,
+           side=side, pos_usd=p["usd"], btc_age_s=round(btc.age_s))
+    p["last"] = int(now_s())
+    st.save()
+    if side is None:
+        return 0.0
+    if btc.age_s > CFG["max_btc_age_s"]:
+        st.log("skip_stale", cid=m["cid"], btc_age_s=round(btc.age_s))  # never trade on stale BTC data
+        return 0.0
+    if abs(mid - q) > 0.5:
+        st.log("skip_disagree", cid=m["cid"], mid=mid, model=q)  # market knows something the model does not
+        return 0.0
+    usd = min(CFG["clip"], CFG["max_pos"] - p["usd"], CFG["max_open"] - open_usd)
+    if usd < 25:
+        if CFG["max_open"] - open_usd < 25:
+            st.log("skip_exposure_cap", cid=m["cid"], open_usd=open_usd)
+        return 0.0
+    tok = m["yes"] if side == "YES" else m["no"]
+    tb, ta = (bids, asks) if side == "YES" else book(m["no"])
+    if not tb or not ta:
+        st.log("skip_book", cid=m["cid"], side=side, why="one-sided book")
+        return 0.0
+    limit = (tb[0][0] + ta[0][0]) / 2 + CFG["max_slip"]  # pay at most the token's book mid + 3c
+    st.log("book", cid=m["cid"], side=side, bids=tb[:8], asks=ta[:8], limit=limit)
+    if os.path.exists(CFG["kill_file"]):
+        st.log("skip_kill", cid=m["cid"])
+        return 0.0
+    r = EXEC.buy(tok, ta, usd, limit)
+    if r["usd"] < 25:
+        st.log("skip_thin", cid=m["cid"], side=side, limit=limit, got_usd=r["usd"], note=r.get("note"), resp=r.get("resp"))
+        return 0.0
+    p["usd"] += r["usd"]
+    p["fees"] += r["fee"]
+    p["sh_yes" if side == "YES" else "sh_no"] += r["shares"]
+    st.save()  # persist every fill immediately: a later error in this pass must not cause a duplicate buy
+    st.log("fill", mode=EXEC.mode, cid=m["cid"], q_mkt=m["q"], side=side, usd=r["usd"], shares=r["shares"],
+           avg=r["avg"], fee=r["fee"], limit=limit, mid=mid, model=q, resp=r.get("resp"))
+    print(f"  {EXEC.mode.upper()} BUY {side:3s} ${r['usd']:.0f} @ {r['avg']:.3f} ({r['shares']:.0f} sh) | "
+          f"{m['q'][:58]} | model {q:.3f} mid {mid:.3f}", flush=True)
+    return r["usd"] + r["fee"]
+
+
 def run_once(st):
-    mkts = active_markets()
+    mkts = active_markets(st.log)
     if mkts:
-        btc = BTC(min(m["start"] for m in mkts) * 1000)
-        print(f"[{iso(now_s())}] BTC {btc.S:,.0f}  1m vol {math.sqrt(btc.var) * 1e4:.2f}bp  markets {len(mkts)}", flush=True)
-    for m in mkts:
-        p = st.s["pos"].setdefault(m["cid"], {"q": m["q"], "event": m["event"], "end": m["end"], "usd": 0.0,
-                                              "fees": 0.0, "sh_yes": 0.0, "sh_no": 0.0, "last": 0})
-        age_h = (now_s() - m["start"]) / 3600
-        if (age_h < CFG["min_age_h"] or now_s() - p["last"] < CFG["every_h"] * 3600
-                or m["end"] - now_s() < CFG["min_days_left"] * 86400):
-            continue
-        ext = btc.extreme_since(m["start"], m["up"])
-        if ext is not None and ((m["up"] and ext >= m["X"]) or (not m["up"] and ext <= m["X"])):
-            continue  # already touched: the market resolves YES
-        bids, asks = book(m["yes"])
-        if not bids or not asks:
-            continue
-        mid = (bids[0][0] + asks[0][0]) / 2
-        if not 0.003 < mid < 0.997:
-            continue
-        q = btc.q_touch(m["X"], m["end"])
-        e_yes = q - (mid + CFG["cost"]) - fee(mid)
-        e_no = (1 - q) - ((1 - mid) + CFG["cost"]) - fee(1 - mid)
-        side = "YES" if e_yes > CFG["thr"] else ("NO" if e_no > CFG["thr"] else None)
-        if side not in CFG["sides"].split(","):
-            side = None
-        st.log("decide", cid=m["cid"], q_mkt=m["q"], S=btc.S, X=m["X"], mid=mid, model=q, e_yes=e_yes, e_no=e_no,
-               side=side, pos_usd=p["usd"])
-        p["last"] = int(now_s())
-        if side is None:
-            continue
-        usd = min(CFG["clip"], CFG["max_pos"] - p["usd"])
-        if usd < 25:
-            continue
-        tok = m["yes"] if side == "YES" else m["no"]
-        tb, ta = (bids, asks) if side == "YES" else book(m["no"])
-        if not tb or not ta:
-            st.log("skip_book", cid=m["cid"], side=side, why="one-sided book")
-            continue
-        limit = (tb[0][0] + ta[0][0]) / 2 + CFG["max_slip"]  # pay at most the token's book mid + 3c
-        st.log("book", cid=m["cid"], side=side, bids=tb[:8], asks=ta[:8], limit=limit)
-        if os.path.exists(CFG["kill_file"]):
-            st.log("skip_kill", cid=m["cid"])
-            continue
-        r = EXEC.buy(tok, ta, usd, limit)
-        if r["usd"] < 25:
-            st.log("skip_thin", cid=m["cid"], side=side, limit=limit, got_usd=r["usd"], note=r.get("note"))
-            continue
-        p["usd"] += r["usd"]
-        p["fees"] += r["fee"]
-        p["sh_yes" if side == "YES" else "sh_no"] += r["shares"]
-        st.log("fill", mode=EXEC.mode, cid=m["cid"], q_mkt=m["q"], side=side, usd=r["usd"], shares=r["shares"],
-               avg=r["avg"], fee=r["fee"], limit=limit, mid=mid, model=q, resp=r.get("resp"))
-        print(f"  {EXEC.mode.upper()} BUY {side:3s} ${r['usd']:.0f} @ {r['avg']:.3f} ({r['shares']:.0f} sh) | "
-              f"{m['q'][:58]} | model {q:.3f} mid {mid:.3f}", flush=True)
+        btc = BTC(min(m["wstart"] for m in mkts) * 1000)
+        print(f"[{iso(now_s())}] BTC {btc.S:,.0f}  1m vol {math.sqrt(btc.var) * 1e4:.2f}bp  markets {len(mkts)}"
+              f"  data age {btc.age_s:.0f}s", flush=True)
+        open_usd = sum(p["usd"] + p["fees"] for p in st.s["pos"].values())
+        for m in mkts:
+            try:
+                open_usd += _decide_and_trade(st, m, btc, open_usd)
+            except Exception as ex:  # noqa: BLE001 - one strike's error must not stop the others
+                st.log("error_market", cid=m.get("cid"), err=repr(ex)[:300])
     # settle positions whose market is no longer active (touched early, or the week ended)
     active = {m["cid"] for m in mkts}
     for cid, p in list(st.s["pos"].items()):
@@ -303,13 +371,18 @@ def run_once(st):
         if p["usd"] <= 0:
             del st.s["pos"][cid]
             continue
-        y = market_outcome(cid)
+        try:
+            y = market_outcome(cid)
+        except Exception as ex:  # noqa: BLE001
+            st.log("error_settle", cid=cid, err=repr(ex)[:300])
+            continue
         if y is None:
             continue  # closed for trading but not yet resolved
         payout = p["sh_yes"] * y + p["sh_no"] * (1 - y)
         pnl = payout - p["usd"] - p["fees"]
         st.s["settled"][cid] = {**p, "yes_final": y, "pnl": pnl, "settled_at": int(now_s())}
         del st.s["pos"][cid]
+        st.save()
         st.log("settle", cid=cid, q_mkt=p["q"], yes_final=y, pnl=pnl)
         print(f"  SETTLED {p['q'][:60]} -> {'YES' if y > 0.5 else 'NO'}  PnL {pnl:+.2f}", flush=True)
     st.save()
@@ -323,7 +396,7 @@ def summary(st):
         if p["usd"] <= 0:
             continue
         try:
-            m = get("https://gamma-api.polymarket.com/markets", {"condition_ids": cid})[0]
+            m = gamma_market(cid)
             yes = json.loads(m["clobTokenIds"])[0]
             bids, asks = book(yes)
             mid = (bids[0][0] + asks[0][0]) / 2 if bids and asks else float(json.loads(m["outcomePrices"])[0])
@@ -345,9 +418,10 @@ def summary(st):
     for ev, (usd, pnl, n) in sorted(weeks.items()):
         print(f"  {ev:60s} strikes {n:2d} cost ${usd:8.2f} PnL {pnl:+9.2f}")
     print(f"  total settled PnL {sum(w[1] for w in weeks.values()):+,.2f}")
-    print("\nbacktest reference at this sizing, after the execution audit (REPORT.md 4h): about +$500/week expected "
-          "(+$200 to +$750 depending on how many signals find a tradable book), about 1 week in 4 losing, "
-          "worst week about -$1,100 to -$2,000.")
+    print("\nreference: after the independent 10-agent audit (REPORT.md 4i) the edge is NOT established. Excluding "
+          "empty-book prices, the backtest gives roughly +$150-300/week at this sizing (t 1.2-2.0, rule refined on the "
+          "test half); the last 6 weeks were about $0. This paper run is the forward test; no real money until it is "
+          "clearly positive over many weeks.")
 
 
 def test_order(st, usd=5.0):

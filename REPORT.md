@@ -430,7 +430,7 @@ Portfolio ($250 / $1,000, 2¢ costs):
 
 This understates capacity, because resting asks nobody lifted aren't visible in a tape.
 
-**Corrected estimate** (placeholders removed, 65% of signals fillable at random, otherwise §4g rules):
+**Corrected estimate — WITHDRAWN by the §4i audit** (placeholders removed, 65% of signals fillable at random, otherwise §4g rules):
 
 | sizing | per week, test half (t) | per week, train half | Jul / Aug / Sep (3 wks) 2026 | worst week |
 |---|---|---|---|---|
@@ -453,6 +453,74 @@ The §4g per-week figures (+$1,157 … +$1,399 at $250/$1,000) are **withdrawn**
 - any taker delay in these markets.
 
 `python -m bot.hitbot --test-order` sends one $5 fill-and-kill order to check these end to end.
+
+## 4i. Independent 10-agent audit (Sep 28 2026): the weekly "hit" edge is NOT established
+
+Ten independent auditors, each re-deriving its area from raw data, reviewed:
+- outcome data;
+- price series;
+- model and look-ahead;
+- statistics;
+- execution;
+- a clean-room re-implementation (without reading r40–r44);
+- portfolio and risk;
+- bot code;
+- unseen weeks;
+- rules and operations.
+
+Scratch outputs are under the session scratchpad (`audit/<area>/`).
+
+**Verdicts.**
+
+| area | verdict |
+|---|---|
+| outcome data | PASS WITH ISSUES |
+| price series | FAIL (for the 4h numbers) |
+| model / look-ahead | FAIL (for the 4h numbers; no classical look-ahead) |
+| statistics | PASS WITH ISSUES |
+| execution | PASS WITH ISSUES |
+| clean-room | FAIL |
+| portfolio / risk | FAIL (profit claims) |
+| bot code | FAIL (fixed, below) |
+| unseen weeks | PASS WITH ISSUES |
+| rules / ops | PASS WITH ISSUES, conditional on the user's jurisdiction |
+
+**Main findings (the 4h numbers are withdrawn).**
+
+1. **Residual empty-book prices.**
+   - The CLOB midpoint of a one-sided or dust book is 0.495, 0.505 or 0.500: a missing bid counts as 0 and a missing ask as 1. r43 only removed 0.500 prints before the first non-0.5 value.
+   - About 22–28% of the "placeholder-free" NO signals are still such mids. They occur mostly at the first 6-h sample, in markets that had never traded, and carry **36–50% of the backtest P&L**.
+   - The next real trade after them prints the YES price about 38¢ away, near the model, not near 0.5.
+   - The bot's mid + 3¢ fill limit would refuse them. The "65% fillable at random" haircut does not fix this: the unfillable signals are the most profitable ones.
+2. **Test-half significance is overstated.**
+   - "NO only" was chosen after seeing the test half. The pre-registered rule scores **t 1.8** on the test half.
+   - The multiple-testing-adjusted p is 0.02–0.18.
+   - A walk-forward that selects settings by past $ loses money; one that selects by past t gives about +$350–550/week before fill haircuts.
+3. **Regime dependence and weak forward evidence.**
+   - Most recent P&L comes from a 2026-Q2/Q3 mid-range mispricing that a model-free rule captures equally well.
+   - The model under-predicts touch probability by 4–5 points where it signals.
+   - The first fully unseen week (Sep 21–27) had **zero** signals.
+   - The last 6 weeks sum to about $0, tied for the worst 6-week stretch in the history.
+4. **Tape floor bug.** r43 used `T.size` (the DataFrame's cell count) instead of the `size` column, so the "tape lower bound" was overstated 2–5×. Now fixed. The true tape-proven floor is about +$40–170 per calendar week.
+5. **Risk.**
+   - The book is effectively short a BTC range every week. A ±5% whipsaw week can lose 60–100% of deployed capital: $5–7.5k at $250/$1,000.
+   - Suggested bankroll for that sizing: $12k or more, with a hard exposure cap.
+   - All history before March 2026 was fee-free, and series volume is about one third of its winter peak.
+
+**Corrected estimate** ($250 clip, $1,000 per strike, NO only, empty-book mids removed, test half): roughly **+$150–300/week, t 1.2–2.0**. That is not statistically established, and recent weeks are about $0.
+
+**Bot fixes applied** (`bot/hitbot.py`):
+- Settlement now finds closed markets (Gamma needs `closed=true`) and only accepts resolved prices (within 1¢ of 0 or 1).
+- State is saved after every fill and settlement, with a per-market error guard, so there are no duplicate buys after an error.
+- The touch window starts at 12:00 AM ET of the week's first day (or at listing for "from the creation" markets), and the touch check includes the currently open candle.
+- No trades on BTC data older than 180 s, when the model and market disagree by more than 0.5, or on books with a spread above 4¢.
+- A total open-exposure cap of $3,000 (`HIT_MAX_OPEN`).
+- Malformed markets are skipped instead of crashing the pass.
+
+**Open items before any live use:**
+- verify fill and fee accounting with the $5 `--test-order`;
+- automate redemption of winning shares, or budget for two weeks of capital;
+- the user must confirm their country is not restricted by Polymarket. Restrictions depend on where the user lives, not where the server is.
 
 ## 5. Deliverable: `bot/`
 
